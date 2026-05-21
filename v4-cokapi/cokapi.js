@@ -332,9 +332,9 @@ function exec_cpp_handler(useCPP /* use bind first */, useJSONP /* use bind firs
 
   // must match the docker setup in backends/c_cpp/Dockerfile
   exeFile = DOCKER_BIN; // use docker from PATH on macOS/Linux
-  args.push('run', '--platform', 'linux/amd64', '-m', MEM_LIMIT, '--rm', '--user=netuser', '--net=none', '--cap-drop', 'all', 'opt-cpp-backend:local',
+  args.push('run', '--platform', 'linux/amd64', '-m', MEM_LIMIT, '--rm', '--user=netuser', '--net=none', '--cap-drop', 'all', 'cpp-tutor/opt-cpp-backend-cpp20-sb:local',
             'python',
-            '/tmp/opt-cpp-backend/run_cpp_backend.py',
+            '/tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py',
             usrCod,
             useCPP ? 'cpp' : 'c');
 

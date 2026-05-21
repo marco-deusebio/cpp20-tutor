@@ -19,8 +19,10 @@ if ! docker info >/dev/null 2>&1; then
   done
 fi
 
-if ! docker image inspect unjudge/opt-cpp-backend:latest >/dev/null 2>&1; then
-  docker pull --platform linux/amd64 unjudge/opt-cpp-backend:latest
+if ! docker image inspect cpp-tutor/opt-cpp-backend-cpp20-sb:local >/dev/null 2>&1; then
+  echo "Missing cpp-tutor/opt-cpp-backend-cpp20-sb:local image."
+  echo "Build it first using the C++20 setup command."
+  exit 1
 fi
 
 DOCKER_BIN="$(command -v docker)"
@@ -39,6 +41,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Starting local C/C++ backend on port 3000..."
+echo "Using local Docker image: cpp-tutor/opt-cpp-backend-cpp20-sb:local"
 sleep 2
 
 (

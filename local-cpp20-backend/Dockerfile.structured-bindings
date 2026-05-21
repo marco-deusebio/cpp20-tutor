@@ -1,0 +1,84 @@
+FROM cpp-tutor/opt-cpp-backend-cpp20:local
+
+RUN cat > /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py <<'PY'
+#!/usr/bin/env python
+import re
+import sys
+
+def rewrite_structured_binding_for_loops(code):
+    lines = code.splitlines(True)
+    out = []
+    pending = None
+    counter = 0
+
+    pattern = re.compile(
+        r'^(?P<indent>\s*)for\s*\(\s*'
+        r'(?P<decl>(?:const\s+)?auto(?:\s*(?:&|&&))?)\s*'
+        r'\[\s*(?P<a>[A-Za-z_]\w*)\s*,\s*(?P<b>[A-Za-z_]\w*)\s*\]\s*'
+        r':\s*(?P<expr>.*?)\s*\)\s*(?P<brace>\{?)\s*(?P<tail>//.*)?(?P<nl>\r?\n?)$'
+    )
+
+    for line in lines:
+        match = pattern.match(line)
+
+        if match:
+            counter += 1
+            indent = match.group('indent')
+            a = match.group('a')
+            b = match.group('b')
+            expr = match.group('expr')
+            brace = match.group('brace')
+            tail = match.group('tail') or ''
+            nl = match.group('nl') or '\n'
+            temp = '__cpp_tutor_sb_%d' % counter
+
+            if brace:
+                out.append('%sfor (auto&& %s : %s) {%s%s' % (
+                    indent,
+                    temp,
+                    expr,
+                    (' ' + tail) if tail else '',
+                    nl
+                ))
+                out.append('%s    auto %s = std::get<0>(%s);%s' % (indent, a, temp, nl))
+                out.append('%s    auto %s = std::get<1>(%s);%s' % (indent, b, temp, nl))
+            else:
+                out.append('%sfor (auto&& %s : %s)%s%s' % (
+                    indent,
+                    temp,
+                    expr,
+                    (' ' + tail) if tail else '',
+                    nl
+                ))
+                pending = (indent, a, b, temp)
+
+            continue
+
+        if pending and line.strip().startswith('{'):
+            out.append(line)
+            indent, a, b, temp = pending
+            nl = '\n'
+            out.append('%s    auto %s = std::get<0>(%s);%s' % (indent, a, temp, nl))
+            out.append('%s    auto %s = std::get<1>(%s);%s' % (indent, b, temp, nl))
+            pending = None
+            continue
+
+        out.append(line)
+
+    rewritten = ''.join(out)
+
+    if counter > 0:
+        if '#include <tuple>' not in rewritten:
+            rewritten = '#include <tuple>\n' + rewritten
+        if '#include <utility>' not in rewritten:
+            rewritten = '#include <utility>\n' + rewritten
+
+    return rewritten
+
+if len(sys.argv) > 1:
+    sys.argv[1] = rewrite_structured_binding_for_loops(sys.argv[1])
+
+execfile('/tmp/opt-cpp-backend/run_cpp_backend.py')
+PY
+
+RUN chmod +x /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py
