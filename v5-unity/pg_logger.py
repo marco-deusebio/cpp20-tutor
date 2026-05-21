@@ -31,7 +31,17 @@
 # NB: try to import the minimal amount of stuff in this module to lessen
 # the security attack surface
 
-import imp
+import importlib.util
+
+class _ImpCompat:
+    @staticmethod
+    def load_source(module_name, filename):
+        spec = importlib.util.spec_from_file_location(module_name, filename)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+imp = _ImpCompat()
 import sys
 import bdb # the KEY import here!
 import re

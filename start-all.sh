@@ -1,44 +1,58 @@
-#!/usr/bin/env bash
-set -euo pipefail
+#!/bin/zsh
+set -e
 
-ROOT="$HOME/pathrise-python-tutor"
-V4="$ROOT/v4-cokapi"
-V5="$ROOT/v5-unity"
+PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-cd "$ROOT"
+lsof -ti tcp:5000 | xargs kill -9 2>/dev/null || true
+lsof -ti tcp:3000 | xargs kill -9 2>/dev/null || true
+lsof -ti tcp:80 | xargs kill -9 2>/dev/null || true
 
-docker info >/dev/null 2>&1 || open -a Docker
+URL="http://localhost:5000/visualize.html"
 
-pkill -f 'bottle_server.py' 2>/dev/null || true
-pkill -f 'cokapi.js http3000' 2>/dev/null || true
+(
+  for i in {1..40}; do
+    if curl -fsS "$URL" >/dev/null 2>&1; then
+      open "$URL"
+      exit 0
+    fi
+    sleep 0.25
+  done
+  open "$URL"
+) &
+
+BACKEND_PID=""
+
+if [ -d "$PROJECT_DIR/v4-cokapi" ]; then
+  (
+    cd "$PROJECT_DIR/v4-cokapi"
+    export PORT=3000
+
+    if [ -f "cokapi.js" ]; then
+      node cokapi.js
+    elif [ -f "server.js" ]; then
+      node server.js
+    elif [ -f "package.json" ]; then
+      npm start
+    else
+      echo "Found v4-cokapi, but could not find cokapi.js, server.js, or package.json."
+    fi
+  ) &
+
+  BACKEND_PID=$!
+  echo "Started C/C++ backend attempt."
+else
+  echo "No v4-cokapi folder found, so only the frontend will start."
+fi
 
 cleanup() {
-  if [[ -n "${BOTTLE_PID:-}" ]]; then
-    kill "$BOTTLE_PID" 2>/dev/null || true
-  fi
-  if [[ -n "${COKAPI_PID:-}" ]]; then
-    kill "$COKAPI_PID" 2>/dev/null || true
+  if [ -n "$BACKEND_PID" ]; then
+    kill "$BACKEND_PID" 2>/dev/null || true
   fi
 }
 trap cleanup EXIT INT TERM
 
-echo "Starting C/C++ backend on http://localhost:3000 ..."
-cd "$V4"
-node cokapi.js http3000 &
-COKAPI_PID=$!
+echo "Starting cpp-tutor..."
+echo "Browser will open automatically at:"
+echo "$URL"
 
-sleep 2
-
-echo "Starting Bottle server on http://localhost:5000 ..."
-cd "$V5"
-source .venv/bin/activate
-python bottle_server.py &
-BOTTLE_PID=$!
-
-sleep 2
-
-echo
-echo "Open: http://localhost:5000/visualize.html"
-echo "Press Ctrl+C here to stop both servers."
-
-wait "$BOTTLE_PID"
+"$PROJECT_DIR/start-cpp-tutor.sh"
