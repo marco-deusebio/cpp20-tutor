@@ -24,3 +24,4 @@ v5-unity/.venv/
 __pycache__/
 .DS_Store
 *.backup-before-imp-fix
+*.backup-before-*
