@@ -27,11 +27,12 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:2837e2207e753068b716d833016a8e3ae3e83b16d653f5250fed67c46391aec2`
+`sha256:4156b8bac8ecaf4dc0732552ffbe243406c305d60c434109dbfcbbb7eccaee85`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
-source-level `std::weak_ptr<T>` and `std::span<T>` summaries.
+source-level `std::weak_ptr<T>`, `std::span<T>`, and `std::string_view`
+summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -91,11 +92,14 @@ Valgrind emitted a bounded dereference payload for `_M_ptr`. `std::span<T>` now
 renders with source-level type names, `data`, `size`, and active `elements`
 when the span data pointer has an emitted heap dereference payload. Stack-backed
 spans still show `data` and `size`, while their viewed stack elements remain
-visible through the backing array local. Nested heap pointers, non-SSO variant
-string payloads, broader variant alternative shapes, general C++ container
-internals, non-null-terminated character buffers, bitfields, fuller
-inherited/base-class layout details, and some static-local/global edge cases
-still need additional forward-port work.
+visible through the backing array local. `std::string_view` now renders with
+source-level type names, `data`, `size`, and non-null-terminated sliced
+`characters` when the view pointer has an emitted character dereference
+payload. Nested heap pointers, non-SSO variant string payloads, broader variant
+alternative shapes, general C++ container internals, non-null-terminated
+non-view character buffers, bitfields, fuller inherited/base-class layout
+details, and some static-local/global edge cases still need additional
+forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -304,6 +308,10 @@ Postprocessor patches live in
   objects, hides `_M_extent` / `_M_ptr` internals, normalizes dynamic extent to
   `std::span<T>`, and renders `data`, `size`, plus sliced `elements` when the
   span points at a bounded heap dereference payload.
+- `0021-cpp-tutor-std-string-view-summary.patch`: recognizes libstdc++
+  `std::basic_string_view<char>` objects, hides `_M_len` / `_M_str` internals,
+  and renders `data`, `size`, plus sliced `characters` without requiring a
+  null terminator.
 
 ## Porting Checklist
 
@@ -503,6 +511,12 @@ Postprocessor patches live in
      heap-backed elements `1,2,30,4`; `tail` renders the sliced elements
      `30,4`; after `push_back(5)`, `nums` grows to five elements while `view`
      remains a four-element span.
+   - Done: post-`0021` `std::string` / `std::string_view` probe compiles/runs
+     with stdout `hello World|World`, clean postprocess stderr, parseable JSON,
+     and Valgrind reporting zero errors. `all` renders as `std::string_view`
+     with `size = 11` and characters `hello World`; `word` renders as a
+     five-character substring view whose characters update from `world` to
+     `World` after the backing string mutation.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
