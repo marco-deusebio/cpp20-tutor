@@ -27,9 +27,9 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:83e9771fffaf5866b51970088e5466f1955dd8a23cb105ebc5bf6b843c2b06b1`
-from the `2026-06-16` rebuild that added clean `std::shared_ptr<T>`
-postprocessing.
+`sha256:2857407b751b4d15084e4dac29073c79d5d8deac47792e872a28e92b1127d132`
+from the `2026-06-16` rebuild that JSON-escapes control characters in
+Valgrind-emitted character heap payloads.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -175,7 +175,10 @@ Current tracked patches:
   defined null-terminated character sequence within 256 bytes, the pointer
   includes a `deref_val` heap-block payload. The postprocessor then places that
   payload into `heap`, so string literals such as `const char* msg = "hey"` and
-  suffix pointers such as `msg + 1` render as character arrays.
+  suffix pointers such as `msg + 1` render as character arrays. The Valgrind
+  emitter also escapes arbitrary control bytes as JSON unicode escapes, which
+  keeps library-managed character buffers parseable even when they contain
+  non-printable bookkeeping bytes.
 - `0009-cpp-tutor-heap-pointer-deref.patch`: extends pointer/reference
   serialization for non-character pointees. If a top-level pointer refers into
   a Valgrind-described heap allocation, the pointer includes a one-level
@@ -397,14 +400,18 @@ Postprocessor patches live in
      `use_count = 1` and structured pointee `Point{x = 2, y = 15}`.
    - Done: post-`0012` smoke, tuple/pair regression, and `unique_ptr`
      regression still pass with clean Valgrind/postprocess stderr.
+   - Done: post-control-character-escape `std::shared_ptr<std::string>` probe
+     compiles/runs with stdout `10 15 cats 2`, clean Valgrind/postprocess
+     stderr, parseable trace JSON, and escaped character heap bytes such as
+     `\u0002` instead of raw control characters.
    - Known gap: `std::optional<T>` and `std::variant<T...>` currently expose
      engagement/index metadata, but their contained payload storage still
      appears as `<UNSUPPORTED>` in the Valgrind-side trace and needs a deeper
      serializer patch before useful value summaries can be added.
-   - Known gap: `std::shared_ptr<std::string>` can surface a raw control
-     character in the emitted string heap payload during construction, which
-     can make the `.vgtrace` JSON parser reject that record. Scalar and simple
-     struct/class shared-pointer pointees are verified.
+   - Known gap: `std::shared_ptr<std::string>` no longer breaks trace parsing,
+     but its pointee still renders as an unsupported struct rather than a clean
+     `std::string` value summary. Scalar and simple struct/class
+     shared-pointer pointees are verified.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

@@ -8,7 +8,7 @@
  
  static void pg_emit_json_string(VgFile* trace_fp, const HChar* str)
  {
-@@ -4519,8 +4520,92 @@
+@@ -4519,8 +4520,97 @@
     *n_dimensions = VG_(sizeXA)(xa);
     *total_elements = total;
     return True;
@@ -33,7 +33,12 @@
 +      case '\n': VG_(fprintf)(trace_fp, "\"\\\\n\""); break;
 +      case '\r': VG_(fprintf)(trace_fp, "\"\\\\r\""); break;
 +      case '\t': VG_(fprintf)(trace_fp, "\"\\\\t\""); break;
-+      default:   VG_(fprintf)(trace_fp, "\"%c\"", ch); break;
++      default:
++         if ((UChar)ch < 0x20)
++            VG_(fprintf)(trace_fp, "\"\\\\u%04x\"", (UInt)(UChar)ch);
++         else
++            VG_(fprintf)(trace_fp, "\"%c\"", ch);
++         break;
 +   }
 +}
 +
