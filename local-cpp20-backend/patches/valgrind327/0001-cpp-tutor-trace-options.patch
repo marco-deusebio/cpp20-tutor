@@ -1,0 +1,86 @@
+diff --git a/memcheck/mc_include.h b/memcheck/mc_include.h
+index 8c7d6f0..6f2d83e 100644
+--- a/memcheck/mc_include.h
++++ b/memcheck/mc_include.h
+@@ -151,6 +151,13 @@ void MC_(make_mem_defined)         ( Addr a, SizeT len );
+ void MC_(copy_address_range_state) ( Addr src, Addr dst, SizeT len );
+ 
+ void MC_(xtmemory_report) ( const HChar* filename, Bool fini );
++typedef struct _VgFile VgFile;
++
++/* cpp-tutor tracing hooks. */
++extern HChar pg_source_filename[1000];
++extern Bool pg_source_filename_init;
++extern VgFile* trace_fp;
++extern Int stdout_fd;
+ 
+ void MC_(print_malloc_stats) ( void );
+ /* nr of free operations done */
+diff --git a/memcheck/mc_main.c b/memcheck/mc_main.c
+index 5ba28d2..cc76d3b 100644
+--- a/memcheck/mc_main.c
++++ b/memcheck/mc_main.c
+@@ -35,6 +35,7 @@
+ #include "pub_tool_libcbase.h"
+ #include "pub_tool_libcassert.h"
+ #include "pub_tool_libcprint.h"
++#include "pub_tool_libcfile.h"
+ #include "pub_tool_machine.h"
+ #include "pub_tool_mallocfree.h"
+ #include "pub_tool_options.h"
+@@ -6095,6 +6096,11 @@ static const HChar * MC_(parse_leak_heuristics_tokens) =
+    heuristic. */
+ 
++HChar pg_source_filename[1000];
++Bool pg_source_filename_init = False;
++VgFile* trace_fp = NULL;
++Int stdout_fd = 0;
++
+ static Bool mc_process_cmd_line_options(const HChar* arg)
+ {
+    const HChar* tmp_str;
+    Bool   tmp_show;
+@@ -6184,6 +6191,14 @@ static Bool mc_process_cmd_line_options(const HChar* arg)
+    else if VG_XACT_CLO(arg, "--leak-resolution=high",
+                        MC_(clo_leak_resolution), Vg_HighRes) {}
+ 
++   else if VG_STR_CLOM(cloPD, arg, "--source-filename", tmp_str) {
++      VG_(strcpy)(pg_source_filename, tmp_str);
++      pg_source_filename_init = True;
++   }
++   else if VG_STR_CLOM(cloPD, arg, "--trace-filename", tmp_str) {
++      trace_fp = VG_(fopen)(tmp_str, VKI_O_CREAT|VKI_O_TRUNC|VKI_O_WRONLY,
++                            VKI_S_IRUSR|VKI_S_IWUSR);
++   }
+    else if VG_STR_CLOM(cloPD, arg, "--ignore-ranges", tmp_str) {
+       Bool ok = parse_ignore_ranges(tmp_str);
+       if (!ok) {
+@@ -8185,6 +8200,16 @@ static void mc_post_clo_init ( void )
+ 
+ static void mc_post_clo_init ( void )
+ {
++   tl_assert(pg_source_filename_init);
++   tl_assert(trace_fp);
++
++   SysRes resW = VG_(open)("/tmp/stdout.txt",
++                           VKI_O_CREAT|VKI_O_RDWR|VKI_O_TRUNC,
++                           VKI_S_IRUSR|VKI_S_IWUSR|VKI_S_IRGRP|VKI_S_IROTH);
++   stdout_fd = sr_Res(resW);
++   tl_assert(!sr_isError(resW));
++   VG_(dup2)(stdout_fd, 1);
++
+    /* If we've been asked to emit XML, mash around various other
+       options so as to constrain the output somewhat. */
+    if (VG_(clo_xml)) {
+@@ -8456,6 +8481,11 @@ static void clear_ocache ( void )
+ 
+ static void mc_fini ( Int exitcode )
+ {
++   if (trace_fp)
++      VG_(fclose)(trace_fp);
++   if (stdout_fd > 0)
++      VG_(close)(stdout_fd);
++
+    MC_(xtmemory_report) (VG_(clo_xtree_memory_file), True);
+    MC_(print_malloc_stats)();
+ 

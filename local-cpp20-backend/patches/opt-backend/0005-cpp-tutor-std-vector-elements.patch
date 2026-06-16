@@ -1,0 +1,45 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -239,7 +239,7 @@ def sizeof_cpp_type(type_name):
+     return None
+ 
+ 
+-def get_std_vector_summary(obj):
++def get_std_vector_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+ 
+@@ -270,7 +270,7 @@ def get_std_vector_summary(obj):
+     if elem_size and start_addr is not None and end_addr is not None and end_addr >= start_addr:
+         capacity = (end_addr - start_addr) // elem_size
+ 
+-    return [
++    ret = [
+         'C_STRUCT',
+         obj['addr'],
+         'std::vector<' + elem_type + '>',
+@@ -279,6 +279,15 @@ def get_std_vector_summary(obj):
+         ['data', ['C_DATA', start['addr'], 'pointer', start.get('val')]]
+     ]
+ 
++    deref_val = start.get('deref_val')
++    if isinstance(size, (int, long)) and deref_val and deref_val.get('kind') == 'heap_block':
++        elements = ['C_ARRAY', deref_val['addr']]
++        for element in (deref_val.get('val') or [])[:size]:
++            elements.append(encode_value(element, heap))
++        ret.append(['elements', elements])
++
++    return ret
++
+ 
+ # returns an encoded value in OPT format and possibly mutates the heap
+ def encode_value(obj, heap):
+@@ -297,7 +306,7 @@ def encode_value(obj, heap):
+                 encode_value(std_string_ptr['deref_val'], heap)
+             return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
+ 
+-        std_vector_summary = get_std_vector_summary(obj)
++        std_vector_summary = get_std_vector_summary(obj, heap)
+         if std_vector_summary is not None:
+             return std_vector_summary
+ 

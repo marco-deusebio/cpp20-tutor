@@ -1,0 +1,53 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -168,8 +168,29 @@
+     #print [(e['func_name'], e['frame_id']) for e in ret['stack_to_render']]
+ 
+     return ret
++
++
++def get_std_string_pointer(obj):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'basic_string<char' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    dataplus = members.get('_M_dataplus')
++    if not dataplus or dataplus.get('kind') != 'struct':
++        return None
++
++    dataplus_members = dataplus.get('val') or {}
++    ptr = dataplus_members.get('_M_p')
++    if ptr and ptr.get('kind') == 'pointer':
++        return ptr
+ 
++    return None
+ 
++
+ # returns an encoded value in OPT format and possibly mutates the heap
+ def encode_value(obj, heap):
+     if obj['kind'] == 'base':
+@@ -181,6 +202,12 @@
+         return ['C_DATA', obj['addr'], 'pointer', obj['val']]
+ 
+     elif obj['kind'] == 'struct':
++        std_string_ptr = get_std_string_pointer(obj)
++        if std_string_ptr is not None:
++            if 'deref_val' in std_string_ptr:
++                encode_value(std_string_ptr['deref_val'], heap)
++            return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
++
+         ret = ['C_STRUCT', obj['addr'], obj['type']]
+ 
+         # sort struct members by address so that they look ORDERED
+@@ -211,7 +238,6 @@
+         return encode_value(obj['val'], heap)
+ 
+     elif obj['kind'] == 'heap_block':
+-        assert obj['addr'] not in heap
+         new_elt = ['C_ARRAY', obj['addr']]
+         for e in obj['val']:
+             new_elt.append(encode_value(e, heap)) # TODO: is an infinite loop possible here?

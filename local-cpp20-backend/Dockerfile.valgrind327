@@ -1,0 +1,110 @@
+FROM ubuntu:18.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV VALGRIND_VERSION=3.27.1
+
+RUN apt-get update && apt-get install -y \
+    git \
+    build-essential \
+    autotools-dev \
+    automake \
+    autoconf \
+    libtool \
+    pkg-config \
+    libc6-dbg \
+    python \
+    python3 \
+    software-properties-common \
+    ca-certificates \
+    curl \
+    xz-utils \
+    bzip2 \
+    && add-apt-repository -y ppa:ubuntu-toolchain-r/test \
+    && apt-get update \
+    && apt-get install -y gcc-10 g++-10 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-10 100 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-10 100 \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/JuezUN/opt-cpp-backend.git /tmp/opt-cpp-backend
+
+COPY patches/valgrind327 /tmp/valgrind327-patches
+
+RUN cd /tmp/opt-cpp-backend \
+    && curl -fsSL "https://sourceware.org/pub/valgrind/valgrind-${VALGRIND_VERSION}.tar.bz2" -o /tmp/valgrind.tar.bz2 \
+    && tar -xjf /tmp/valgrind.tar.bz2 \
+    && cd "valgrind-${VALGRIND_VERSION}" \
+    && if ls /tmp/valgrind327-patches/*.patch >/dev/null 2>&1; then \
+         for patch_file in /tmp/valgrind327-patches/*.patch; do \
+           echo "Applying ${patch_file}"; \
+           patch -p1 < "${patch_file}"; \
+         done; \
+       fi \
+    && ./configure --prefix=`pwd`/inst \
+    && make -j2 \
+    && make install \
+    && rm /tmp/valgrind.tar.bz2
+
+RUN python3 - <<'PY'
+from pathlib import Path
+
+p = Path("/tmp/opt-cpp-backend/run_cpp_backend.py")
+text = p.read_text()
+
+replacements = {
+    "DIALECT = '-std=c++11'": "DIALECT = '-std=gnu++20'",
+    'DIALECT = "-std=c++11"': 'DIALECT = "-std=gnu++20"',
+    "DIALECT='-std=c++11'": "DIALECT='-std=gnu++20'",
+    'DIALECT="-std=c++11"': 'DIALECT="-std=gnu++20"',
+    "-std=c++11": "-std=gnu++20",
+    "-std=gnu++11": "-std=gnu++20",
+    "-std=c++0x": "-std=gnu++20",
+    "-std=c11": "-std=gnu17",
+    "valgrind-3.11.0/inst/bin/valgrind": "valgrind-3.27.1/inst/bin/valgrind",
+}
+
+for old, new in replacements.items():
+    text = text.replace(old, new)
+
+p.write_text(text)
+
+if "-std=c++11" in text or "-std=gnu++11" in text or "-std=c++0x" in text:
+    raise SystemExit("C++11 flag still exists in run_cpp_backend.py")
+
+if "-std=gnu++20" not in text:
+    raise SystemExit("GNU++20 flag was not inserted into run_cpp_backend.py")
+
+if "valgrind-3.27.1/inst/bin/valgrind" not in text:
+    raise SystemExit("Valgrind 3.27.1 executable path was not inserted")
+
+if "'--read-var-info=yes'" not in text and '"--read-var-info=yes"' not in text:
+    text = text.replace(
+        "'--tool=memcheck',",
+        "'--tool=memcheck',\n                        '--read-var-info=yes',"
+    )
+    p.write_text(text)
+
+if "'--read-var-info=yes'" not in text and '"--read-var-info=yes"' not in text:
+    raise SystemExit("Valgrind variable debug info flag was not inserted")
+
+print("Verified experimental backend now points at GNU++20, Valgrind 3.27.1, and read-var-info.")
+PY
+
+RUN /tmp/opt-cpp-backend/valgrind-3.27.1/inst/bin/valgrind --version \
+    && grep -n "DIALECT\\|VALGRIND_EXE\\|read-var-info" /tmp/opt-cpp-backend/run_cpp_backend.py \
+    && g++ --version
+
+COPY patches/opt-backend /tmp/opt-backend-patches
+
+RUN cd /tmp/opt-cpp-backend \
+    && if ls /tmp/opt-backend-patches/*.patch >/dev/null 2>&1; then \
+         for patch_file in /tmp/opt-backend-patches/*.patch; do \
+           echo "Applying ${patch_file}"; \
+           patch -p1 < "${patch_file}"; \
+         done; \
+       fi \
+    && python -m py_compile /tmp/opt-cpp-backend/vg_to_opt_trace.py
+
+RUN useradd netuser \
+    && cd /tmp \
+    && find opt-cpp-backend | xargs chown netuser

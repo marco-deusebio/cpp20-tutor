@@ -1,0 +1,68 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4434,6 +4434,7 @@
+ 
+ #define PG_MAX_LOCAL_VARS 256
+ #define PG_MAX_ARRAY_ELEMENTS 256
++#define PG_MAX_STRUCT_FIELDS 128
+ 
+ static void pg_emit_json_string(VgFile* trace_fp, const HChar* str)
+ {
+@@ -4608,6 +4609,57 @@
+       }
+ 
+       VG_(fprintf)(trace_fp, "\n]}");
++      return;
++   }
++
++   if (ent->tag == Te_TyStOrUn) {
++      Word i;
++      Bool first_field = True;
++      XArray* fieldRs;
++      const HChar* struct_name;
++
++      if (!ent->Te.TyStOrUn.complete || !ent->Te.TyStOrUn.isStruct ||
++          !ent->Te.TyStOrUn.fieldRs) {
++         pg_emit_unsupported_varinfo(trace_fp, data_addr, "<struct>");
++         return;
++      }
++
++      fieldRs = ent->Te.TyStOrUn.fieldRs;
++      if (VG_(sizeXA)(fieldRs) > PG_MAX_STRUCT_FIELDS) {
++         pg_emit_unsupported_varinfo(trace_fp, data_addr, "<struct>");
++         return;
++      }
++
++      struct_name = ent->Te.TyStOrUn.name ? ent->Te.TyStOrUn.name
++                                          : "<anonymous>";
++      VG_(fprintf)(trace_fp,
++                   "{\"addr\":\"%p\", \"kind\":\"struct\", \"type\":",
++                   (void*)data_addr);
++      pg_emit_json_string(trace_fp, struct_name);
++      VG_(fprintf)(trace_fp, ", \"val\": {\n  ");
++
++      for (i = 0; i < VG_(sizeXA)(fieldRs); i++) {
++         UWord fieldR = *(UWord*)VG_(indexXA)(fieldRs, i);
++         TyEnt* field = ML_(TyEnts__index_by_cuOff)(tyents, NULL, fieldR);
++         Addr field_addr;
++
++         if (!field || field->tag != Te_Field || !field->Te.Field.isStruct ||
++             field->Te.Field.nLoc != -1 || !field->Te.Field.name) {
++            continue;
++         }
++
++         if (!first_field)
++            VG_(fprintf)(trace_fp, ",\n  ");
++         first_field = False;
++
++         field_addr = data_addr + field->Te.Field.pos.offset;
++         pg_emit_json_string(trace_fp, field->Te.Field.name);
++         VG_(fprintf)(trace_fp, ":");
++         pg_emit_minimal_varinfo(tyents, field->Te.Field.typeR, field_addr,
++                                 is_mem_defined_func, trace_fp);
++      }
++
++      VG_(fprintf)(trace_fp, "}}");
+       return;
+    }
+ 

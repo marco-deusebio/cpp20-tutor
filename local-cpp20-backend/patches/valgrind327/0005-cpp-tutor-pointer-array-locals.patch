@@ -1,0 +1,128 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4433,6 +4433,7 @@
+    PgLocalVar;
+ 
+ #define PG_MAX_LOCAL_VARS 256
++#define PG_MAX_ARRAY_ELEMENTS 256
+ 
+ static void pg_emit_json_string(VgFile* trace_fp, const HChar* str)
+ {
+@@ -4470,6 +4471,52 @@
+                 "{\"addr\":\"%p\", \"kind\":\"base\", \"type\":\"%s\", \"size\":0, \"val\":\"<UNSUPPORTED>\"}",
+                 (void*)data_addr,
+                 type_name ? type_name : "<unsupported>");
++}
++
++static Bool pg_array_element_count(const XArray* tyents,
++                                   TyEnt* ent,
++                                   Long* dimensions,
++                                   Word max_dimensions,
++                                   Word* n_dimensions,
++                                   ULong* total_elements)
++{
++   Word i;
++   ULong total = 1;
++   XArray* xa;
++
++   *n_dimensions = 0;
++   *total_elements = 0;
++   if (!ent->Te.TyArray.boundRs)
++      return False;
++
++   xa = ent->Te.TyArray.boundRs;
++   if (VG_(sizeXA)(xa) > max_dimensions)
++      return False;
++
++   for (i = 0; i < VG_(sizeXA)(xa); i++) {
++      UWord bound_cuOff = *(UWord*)VG_(indexXA)(xa, i);
++      TyEnt* bound_ent = ML_(TyEnts__index_by_cuOff)(tyents, NULL, bound_cuOff);
++      Long dimension;
++      if (!bound_ent || bound_ent->tag != Te_Bound)
++         return False;
++      if (!bound_ent->Te.Bound.knownL || !bound_ent->Te.Bound.knownU)
++         return False;
++      if (bound_ent->Te.Bound.boundL != 0)
++         return False;
++
++      dimension = bound_ent->Te.Bound.boundU + 1;
++      if (dimension <= 0)
++         return False;
++      if (total > PG_MAX_ARRAY_ELEMENTS / (ULong)dimension)
++         return False;
++
++      dimensions[i] = dimension;
++      total *= (ULong)dimension;
++   }
++
++   *n_dimensions = VG_(sizeXA)(xa);
++   *total_elements = total;
++   return True;
+ }
+ 
+ static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
+@@ -4506,6 +4553,64 @@
+       return;
+    }
+ 
++   if (ent->tag == Te_TyPtr || ent->tag == Te_TyRef) {
++      Addr ptr_val;
++      VG_(fprintf)(trace_fp,
++                   "{\"addr\":\"%p\", \"kind\":\"pointer\", \"size\":%u, \"val\":",
++                   (void*)data_addr,
++                   ent->Te.TyPorR.szB);
++      res = is_mem_defined_func(data_addr, ent->Te.TyPorR.szB, &bad_addr, &otag);
++      if (res == 6) {
++         VG_(fprintf)(trace_fp, "\"<UNALLOCATED>\"}");
++      } else if (res == 7) {
++         VG_(fprintf)(trace_fp, "\"<UNINITIALIZED>\"}");
++      } else {
++         ptr_val = *((Addr*)data_addr);
++         VG_(fprintf)(trace_fp, "\"%p\"}", (void*)ptr_val);
++      }
++      return;
++   }
++
++   if (ent->tag == Te_TyArray) {
++      Word i;
++      Word n_dimensions;
++      Long dimensions[8];
++      ULong total_elements;
++      Bool have_total = pg_array_element_count(tyents, ent, dimensions,
++                                               8, &n_dimensions,
++                                               &total_elements);
++      MaybeULong element_size = ML_(sizeOfType)(tyents, ent->Te.TyArray.typeR);
++      Addr cur_elt_addr = data_addr;
++
++      if (!have_total || !element_size.b ||
++          total_elements == 0 || element_size.ul == 0) {
++         pg_emit_unsupported_varinfo(trace_fp, data_addr, "<array>");
++         return;
++      }
++
++      VG_(fprintf)(trace_fp,
++                   "{\"addr\":\"%p\", \"kind\":\"array\", \"size\":%u, \"dimensions\": [",
++                   (void*)data_addr,
++                   (UInt)total_elements);
++      for (i = 0; i < n_dimensions; i++) {
++         if (i > 0)
++            VG_(fprintf)(trace_fp, ", ");
++         VG_(fprintf)(trace_fp, "%lld", (long long int)dimensions[i]);
++      }
++      VG_(fprintf)(trace_fp, "], \"val\": [\n  ");
++
++      for (i = 0; i < total_elements; i++) {
++         if (i > 0)
++            VG_(fprintf)(trace_fp, ",\n  ");
++         pg_emit_minimal_varinfo(tyents, ent->Te.TyArray.typeR,
++                                 cur_elt_addr, is_mem_defined_func, trace_fp);
++         cur_elt_addr += element_size.ul;
++      }
++
++      VG_(fprintf)(trace_fp, "\n]}");
++      return;
++   }
++
+    if (ent->tag != Te_TyBase) {
+       pg_emit_unsupported_varinfo(trace_fp, data_addr, "<non-scalar>");
+       return;

@@ -1,0 +1,412 @@
+--- a/memcheck/mc_include.h
++++ b/memcheck/mc_include.h
+@@ -152,6 +152,16 @@
+ extern Bool pg_source_filename_init;
+ extern VgFile* trace_fp;
+ extern Int stdout_fd;
++
++typedef
++   enum {
++      MC_Ok = 5,
++      MC_AddrErr = 6,
++      MC_ValueErr = 7
++   }
++   MC_ReadResult;
++
++MC_ReadResult is_mem_defined(Addr a, SizeT len, Addr* bad_addr, UInt* otag);
+ 
+ void MC_(print_malloc_stats) ( void );
+ /* nr of free operations done */
+--- a/memcheck/mc_main.c
++++ b/memcheck/mc_main.c
+@@ -4237,15 +4237,6 @@
+ /*--- Checking memory                                      ---*/
+ /*------------------------------------------------------------*/
+ 
+-typedef
+-   enum {
+-      MC_Ok = 5,
+-      MC_AddrErr = 6,
+-      MC_ValueErr = 7
+-   }
+-   MC_ReadResult;
+-
+-
+ /* Check permissions for address range.  If inadequate permissions
+    exist, *bad_addr is set to the offending address, so the caller can
+    know what it is. */
+@@ -4291,9 +4282,9 @@
+    return True;
+ }
+ 
+-static MC_ReadResult is_mem_defined ( Addr a, SizeT len,
+-                                      /*OUT*/Addr* bad_addr,
+-                                      /*OUT*/UInt* otag )
++MC_ReadResult is_mem_defined ( Addr a, SizeT len,
++                               /*OUT*/Addr* bad_addr,
++                               /*OUT*/UInt* otag )
+ {
+    SizeT i;
+    UWord vabits2;
+--- a/include/pub_tool_debuginfo.h
++++ b/include/pub_tool_debuginfo.h
+@@ -256,7 +256,16 @@
+ VG_(di_get_global_blocks_from_dihandle) ( ULong di_handle,
+                                           Bool  arrays_only );
+ 
++typedef struct _VgFile VgFile;
+ 
++extern Bool VG_(pg_emit_local_vars_for_frame)(
++   DiEpoch ep,
++   Addr ip, Addr sp, Addr fp,
++   Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++   VgFile* trace_fp
++);
++
++
+ /*====================================================================*/
+ /*=== Obtaining information pertaining to shared objects.          ===*/
+ /*====================================================================*/
+--- a/memcheck/mc_translate.c
++++ b/memcheck/mc_translate.c
+@@ -8816,13 +8816,17 @@
+ /* cpp-tutor tracing.  This is the first Valgrind 3.27.x port slice:
+    emit valid step records with line/function/stack metadata. */
+ #define CPP_TUTOR_MAX_STEPS 5000
+-#define CPP_TUTOR_MAX_ORDERED_VARNAMES 200
+ #define CPP_TUTOR_STDOUT_BUF_SIZE (10 * 1024 * 1024)
+ 
+ static Int cpp_tutor_n_steps = 0;
+ static HChar cpp_tutor_stdout_buf[CPP_TUTOR_STDOUT_BUF_SIZE + 1];
+ 
+ VG_REGPARM(1) void pg_trace_inst_minimal(Addr ad);
++
++static Int cpp_tutor_is_mem_defined(Addr a, SizeT len, Addr* bad_addr, UInt* otag)
++{
++   return (Int)is_mem_defined(a, len, bad_addr, otag);
++}
+ 
+ static HChar* cpp_tutor_json_encode_string(const HChar* str)
+ {
+@@ -8926,7 +8930,7 @@
+    VG_(fprintf)(trace_fp,
+                 "\"func_name\": \"%s\", \"line\": %d, \"IP\": \"%p\", \"kind\": %d, ",
+                 hasfn ? fn : "???",
+-                haslinenum ? linenum : -999,
++                haslinenum ? (Int)linenum : -999,
+                 (void*)a,
+                 (int)kind);
+ 
+@@ -8956,38 +8960,17 @@
+       const HChar* cur_fn;
+       Bool cur_hasfn = VG_(get_fnname)(ep, cur_ip, &cur_fn);
+       UInt cur_linenum;
+-      XArray* blocks;
+-      Word j;
+       Bool cur_haslinenum = VG_(get_linenum)(ep, cur_ip, &cur_linenum);
+ 
+       VG_(fprintf)(trace_fp,
+-                   "{\"func_name\":\"%s\", \"line\": %d, \"SP\": \"%p\", \"FP\": \"%p\", \"locals\": {}, \"ordered_varnames\": [",
++                   "{\"func_name\":\"%s\", \"line\": %d, \"SP\": \"%p\", \"FP\": \"%p\", ",
+                    cur_hasfn ? cur_fn : "???",
+-                   cur_haslinenum ? cur_linenum : -999,
++                   cur_haslinenum ? (Int)cur_linenum : -999,
+                    (void*)cur_sp,
+                    (void*)cur_fp);
+-
+-      blocks = VG_(di_get_stack_blocks_at_ip)(cur_ip, False);
+-      if (blocks) {
+-         Bool first_local = True;
+-         Word n_blocks = VG_(sizeXA)(blocks);
+-         if (n_blocks > CPP_TUTOR_MAX_ORDERED_VARNAMES)
+-            n_blocks = CPP_TUTOR_MAX_ORDERED_VARNAMES;
+-         for (j = 0; j < n_blocks; j++) {
+-            StackBlock* sb = VG_(indexXA)(blocks, j);
+-            const HChar* name = sb->fullname ? sb->fullname : sb->name;
+-            HChar* name_json = cpp_tutor_json_encode_string(name);
+-            if (first_local)
+-               first_local = False;
+-            else
+-               VG_(fprintf)(trace_fp, ", ");
+-            VG_(fprintf)(trace_fp, "%s", name_json);
+-            VG_(free)(name_json);
+-         }
+-         VG_(deleteXA)(blocks);
+-      }
+-
+-      VG_(fprintf)(trace_fp, "]}");
++      VG_(pg_emit_local_vars_for_frame)(ep, cur_ip, cur_sp, cur_fp,
++                                        cpp_tutor_is_mem_defined, trace_fp);
++      VG_(fprintf)(trace_fp, "}");
+    }
+    VG_(fprintf)(trace_fp, "]\n");
+    VG_(fprintf)(trace_fp, "}\n");
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4421,8 +4421,266 @@
+    }
+ 
+    return False;
++}
++
++typedef
++   struct {
++      const HChar* name;
++      Addr addr;
++      UWord typeR;
++      const XArray* tyents;
++   }
++   PgLocalVar;
++
++#define PG_MAX_LOCAL_VARS 256
++
++static void pg_emit_json_string(VgFile* trace_fp, const HChar* str)
++{
++   const HChar* p;
++   VG_(fprintf)(trace_fp, "\"");
++   for (p = str; p && *p; p++) {
++      switch (*p) {
++         case '"':  VG_(fprintf)(trace_fp, "\\\""); break;
++         case '\\': VG_(fprintf)(trace_fp, "\\\\"); break;
++         case '\n': VG_(fprintf)(trace_fp, "\\n"); break;
++         case '\r': VG_(fprintf)(trace_fp, "\\r"); break;
++         case '\t': VG_(fprintf)(trace_fp, "\\t"); break;
++         default:   VG_(fprintf)(trace_fp, "%c", *p); break;
++      }
++   }
++   VG_(fprintf)(trace_fp, "\"");
++}
++
++static TyEnt* pg_resolve_display_type(const XArray* tyents, UWord cuOff)
++{
++   TyEnt* ent = ML_(TyEnts__index_by_cuOff)(tyents, NULL, cuOff);
++   while (ent && (ent->tag == Te_TyQual || ent->tag == Te_TyTyDef)) {
++      if (ent->tag == Te_TyQual)
++         ent = ML_(TyEnts__index_by_cuOff)(tyents, NULL, ent->Te.TyQual.typeR);
++      else
++         ent = ML_(TyEnts__index_by_cuOff)(tyents, NULL, ent->Te.TyTyDef.typeR);
++   }
++   return ent;
++}
++
++static void pg_emit_unsupported_varinfo(VgFile* trace_fp, Addr data_addr,
++                                        const HChar* type_name)
++{
++   VG_(fprintf)(trace_fp,
++                "{\"addr\":\"%p\", \"kind\":\"base\", \"type\":\"%s\", \"size\":0, \"val\":\"<UNSUPPORTED>\"}",
++                (void*)data_addr,
++                type_name ? type_name : "<unsupported>");
++}
++
++static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
++                                    Addr data_addr,
++                                    Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++                                    VgFile* trace_fp)
++{
++   TyEnt* ent = pg_resolve_display_type(tyents, typeR);
++   Addr bad_addr;
++   UInt otag = 0;
++   Int res;
++
++   if (!ent) {
++      pg_emit_unsupported_varinfo(trace_fp, data_addr, "<unknown>");
++      return;
++   }
++
++   if (ent->tag == Te_TyEnum) {
++      VG_(fprintf)(trace_fp,
++                   "{\"addr\":\"%p\", \"kind\":\"base\", \"type\":\"%s\", \"size\":%u, \"val\":",
++                   (void*)data_addr,
++                   ent->Te.TyEnum.name ? ent->Te.TyEnum.name : "anonymous enum",
++                   ent->Te.TyEnum.szB);
++      res = is_mem_defined_func(data_addr, ent->Te.TyEnum.szB, &bad_addr, &otag);
++      if (res == 6) {
++         VG_(fprintf)(trace_fp, "\"<UNALLOCATED>\"}");
++      } else if (res == 7) {
++         VG_(fprintf)(trace_fp, "\"<UNINITIALIZED>\"}");
++      } else if (ent->Te.TyEnum.szB <= sizeof(int)) {
++         VG_(fprintf)(trace_fp, "%d}", *((int*)data_addr));
++      } else {
++         VG_(fprintf)(trace_fp, "%lld}", *((long long int*)data_addr));
++      }
++      return;
++   }
++
++   if (ent->tag != Te_TyBase) {
++      pg_emit_unsupported_varinfo(trace_fp, data_addr, "<non-scalar>");
++      return;
++   }
++
++   VG_(fprintf)(trace_fp,
++                "{\"addr\":\"%p\", \"kind\":\"base\", \"type\":\"%s\", \"size\":%u, \"val\":",
++                (void*)data_addr,
++                ent->Te.TyBase.name ? ent->Te.TyBase.name : "<anonymous>",
++                ent->Te.TyBase.szB);
++
++   res = is_mem_defined_func(data_addr, ent->Te.TyBase.szB, &bad_addr, &otag);
++   if (res == 6) {
++      VG_(fprintf)(trace_fp, "\"<UNALLOCATED>\"}");
++      return;
++   }
++   if (res == 7) {
++      VG_(fprintf)(trace_fp, "\"<UNINITIALIZED>\"}");
++      return;
++   }
++
++   switch (ent->Te.TyBase.enc) {
++      case 'S':
++         if (ent->Te.TyBase.szB == sizeof(char)) {
++            HChar str[3];
++            HChar val = *((char*)data_addr);
++            if (val == '\0') {
++               str[0] = '\\'; str[1] = '0'; str[2] = 0;
++            } else {
++               str[0] = val; str[1] = 0;
++            }
++            pg_emit_json_string(trace_fp, str);
++         } else if (ent->Te.TyBase.szB == sizeof(short)) {
++            VG_(fprintf)(trace_fp, "%d", *((short*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(int)) {
++            VG_(fprintf)(trace_fp, "%d", *((int*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(long int)) {
++            VG_(fprintf)(trace_fp, "%ld", *((long int*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(long long int)) {
++            VG_(fprintf)(trace_fp, "%lld", *((long long int*)data_addr));
++         } else {
++            VG_(fprintf)(trace_fp, "\"<UNSUPPORTED>\"");
++         }
++         break;
++      case 'U':
++         if (ent->Te.TyBase.szB == sizeof(unsigned char)) {
++            VG_(fprintf)(trace_fp, "%u", *((unsigned char*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(unsigned short)) {
++            VG_(fprintf)(trace_fp, "%u", *((unsigned short*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(unsigned int)) {
++            VG_(fprintf)(trace_fp, "%u", *((unsigned int*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(unsigned long int)) {
++            VG_(fprintf)(trace_fp, "%lu", *((unsigned long int*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(unsigned long long int)) {
++            VG_(fprintf)(trace_fp, "%llu", *((unsigned long long int*)data_addr));
++         } else {
++            VG_(fprintf)(trace_fp, "\"<UNSUPPORTED>\"");
++         }
++         break;
++      case 'F':
++         if (ent->Te.TyBase.szB == sizeof(float)) {
++            VG_(fprintf)(trace_fp, "%f", *((float*)data_addr));
++         } else if (ent->Te.TyBase.szB == sizeof(double)) {
++            VG_(fprintf)(trace_fp, "%f", *((double*)data_addr));
++         } else {
++            VG_(fprintf)(trace_fp, "\"<UNSUPPORTED>\"");
++         }
++         break;
++      default:
++         VG_(fprintf)(trace_fp, "\"<UNSUPPORTED>\"");
++         break;
++   }
++
++   VG_(fprintf)(trace_fp, "}");
++}
++
++static Word pg_collect_local_vars(PgLocalVar* locals, Word max_locals,
++                                  DiEpoch ep, Addr ip, Addr sp, Addr fp)
++{
++   Word i;
++   Word n_locals = 0;
++   DebugInfo* di;
++   RegSummary regs;
++
++   for (di = debugInfo_list; di; di = di->next) {
++      if (!is_DI_valid_for_epoch(di, ep))
++         continue;
++      if (!di->text_present || di->text_size == 0)
++         continue;
++      if (di->text_avma <= ip && ip < di->text_avma + di->text_size)
++         break;
++   }
++
++   if (!di || !di->varinfo)
++      return 0;
++
++   regs.ip = ip;
++   regs.sp = sp;
++   regs.fp = fp;
++
++   for (i = VG_(sizeXA)(di->varinfo) - 1; i >= 1; i--) {
++      XArray* vars;
++      Word j;
++      DiAddrRange* arange;
++      OSet* this_scope = *(OSet**)VG_(indexXA)(di->varinfo, i);
++      if (!this_scope)
++         continue;
++
++      arange = VG_(OSetGen_LookupWithCmp)(
++         this_scope, &ip, ML_(cmp_for_DiAddrRange_range)
++      );
++      if (!arange || !arange->vars)
++         continue;
++
++      vars = arange->vars;
++      for (j = 0; j < VG_(sizeXA)(vars) && n_locals < max_locals; j++) {
++         DiVariable* var = (DiVariable*)VG_(indexXA)(vars, j);
++         GXResult res;
++         MaybeULong mul;
++         if (!var->name || !var->gexpr)
++            continue;
++         mul = ML_(sizeOfType)(di->admin_tyents, var->typeR);
++         if (!mul.b || mul.ul == 0)
++            continue;
++         res = ML_(evaluate_GX)(var->gexpr, var->fbGX, &regs, di);
++         if (res.kind != GXR_Addr)
++            continue;
++         locals[n_locals].name = var->name;
++         locals[n_locals].addr = res.word;
++         locals[n_locals].typeR = var->typeR;
++         locals[n_locals].tyents = di->admin_tyents;
++         n_locals++;
++      }
++   }
++
++   return n_locals;
+ }
+ 
++Bool VG_(pg_emit_local_vars_for_frame)(
++   DiEpoch ep,
++   Addr ip, Addr sp, Addr fp,
++   Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++   VgFile* trace_fp
++)
++{
++   PgLocalVar locals[PG_MAX_LOCAL_VARS];
++   Word i;
++   Word n_locals = pg_collect_local_vars(locals, PG_MAX_LOCAL_VARS,
++                                         ep, ip, sp, fp);
++
++   if (n_locals == 0)
++      n_locals = pg_collect_local_vars(locals, PG_MAX_LOCAL_VARS,
++                                       ep, ip + 1, sp, fp);
++
++   VG_(fprintf)(trace_fp, "\"locals\": {\n");
++   for (i = 0; i < n_locals; i++) {
++      if (i > 0)
++         VG_(fprintf)(trace_fp, ",\n");
++      VG_(fprintf)(trace_fp, "  ");
++      pg_emit_json_string(trace_fp, locals[i].name);
++      VG_(fprintf)(trace_fp, ": ");
++      pg_emit_minimal_varinfo(locals[i].tyents, locals[i].typeR,
++                              locals[i].addr, is_mem_defined_func, trace_fp);
++   }
++   VG_(fprintf)(trace_fp, "},\n\"ordered_varnames\": [");
++   for (i = 0; i < n_locals; i++) {
++      if (i > 0)
++         VG_(fprintf)(trace_fp, ",");
++      pg_emit_json_string(trace_fp, locals[i].name);
++   }
++   VG_(fprintf)(trace_fp, "]");
++
++   return n_locals > 0;
++}
++
+ /* Try to form some description of DATA_ADDR by looking at the DWARF3
+    debug info we have.  This considers all global variables, and 8
+    frames in the stacks of all threads.  Result is written at the ends

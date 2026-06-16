@@ -1,0 +1,150 @@
+--- a/include/pub_tool_debuginfo.h
++++ b/include/pub_tool_debuginfo.h
+@@ -265,7 +265,14 @@
+    VgFile* trace_fp
+ );
+ 
++extern Bool VG_(pg_emit_global_vars_for_ip)(
++   DiEpoch ep,
++   Addr ip,
++   Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++   VgFile* trace_fp
++);
+ 
++
+ /*====================================================================*/
+ /*=== Obtaining information pertaining to shared objects.          ===*/
+ /*====================================================================*/
+--- a/memcheck/mc_translate.c
++++ b/memcheck/mc_translate.c
+@@ -8939,6 +8939,8 @@
+    Addr fps[100];
+    UInt stack_depth = VG_(get_StackTrace)(VG_(get_running_tid)(),
+                                           ips, 100, sps, fps, 0);
++
++   VG_(pg_emit_global_vars_for_ip)(ep, a, cpp_tutor_is_mem_defined, trace_fp);
+ 
+    VG_(fprintf)(trace_fp, "\"stack\": [\n");
+    Bool first_stack_entry = True;
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4433,6 +4433,7 @@
+    PgLocalVar;
+ 
+ #define PG_MAX_LOCAL_VARS 256
++#define PG_MAX_GLOBAL_VARS 256
+ #define PG_MAX_ARRAY_ELEMENTS 256
+ #define PG_MAX_STRUCT_FIELDS 128
+ 
+@@ -4836,8 +4837,111 @@
+    VG_(fprintf)(trace_fp, "]");
+ 
+    return n_locals > 0;
++}
++
++static DebugInfo* pg_find_debug_info_for_ip(DiEpoch ep, Addr ip)
++{
++   DebugInfo* di;
++   for (di = debugInfo_list; di; di = di->next) {
++      if (!is_DI_valid_for_epoch(di, ep))
++         continue;
++      if (!di->text_present || di->text_size == 0)
++         continue;
++      if (di->text_avma <= ip && ip < di->text_avma + di->text_size)
++         return di;
++   }
++   return NULL;
++}
++
++static Word pg_collect_global_vars(PgLocalVar* globals, Word max_globals,
++                                   DiEpoch ep, Addr ip)
++{
++   Word scopeIx;
++   Word n_globals = 0;
++   DebugInfo* di = pg_find_debug_info_for_ip(ep, ip);
++
++   if (!di || !di->varinfo)
++      return 0;
++
++   for (scopeIx = 0; scopeIx < VG_(sizeXA)(di->varinfo); scopeIx++) {
++      OSet* scope = *(OSet**)VG_(indexXA)(di->varinfo, scopeIx);
++      DiAddrRange* range;
++      if (!scope)
++         continue;
++
++      VG_(OSetGen_ResetIter)(scope);
++      while ((range = VG_(OSetGen_Next)(scope))) {
++         Word varIx;
++         if (!range->vars)
++            continue;
++
++         for (varIx = 0;
++              varIx < VG_(sizeXA)(range->vars) && n_globals < max_globals;
++              varIx++) {
++            DiVariable* var = (DiVariable*)VG_(indexXA)(range->vars, varIx);
++            GXResult res;
++            MaybeULong mul;
++
++            if (!var->name || !var->gexpr)
++               continue;
++
++            res = ML_(evaluate_trivial_GX)(var->gexpr, di);
++            if (res.kind != GXR_Addr)
++               continue;
++
++            mul = ML_(sizeOfType)(di->admin_tyents, var->typeR);
++            if (!mul.b || mul.ul == 0)
++               continue;
++
++            globals[n_globals].name = var->name;
++            globals[n_globals].addr = res.word;
++            globals[n_globals].typeR = var->typeR;
++            globals[n_globals].tyents = di->admin_tyents;
++            n_globals++;
++         }
++      }
++   }
++
++   return n_globals;
+ }
+ 
++Bool VG_(pg_emit_global_vars_for_ip)(
++   DiEpoch ep,
++   Addr ip,
++   Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++   VgFile* trace_fp
++)
++{
++   PgLocalVar globals[PG_MAX_GLOBAL_VARS];
++   Word i;
++   Word n_globals = pg_collect_global_vars(globals, PG_MAX_GLOBAL_VARS,
++                                           ep, ip);
++
++   if (n_globals == 0)
++      n_globals = pg_collect_global_vars(globals, PG_MAX_GLOBAL_VARS,
++                                         ep, ip + 1);
++
++   VG_(fprintf)(trace_fp, "\"globals\": {\n");
++   for (i = 0; i < n_globals; i++) {
++      if (i > 0)
++         VG_(fprintf)(trace_fp, ",\n");
++      VG_(fprintf)(trace_fp, "  ");
++      pg_emit_json_string(trace_fp, globals[i].name);
++      VG_(fprintf)(trace_fp, ": ");
++      pg_emit_minimal_varinfo(globals[i].tyents, globals[i].typeR,
++                              globals[i].addr, is_mem_defined_func, trace_fp);
++   }
++   VG_(fprintf)(trace_fp, "},\n\"ordered_globals\": [");
++   for (i = 0; i < n_globals; i++) {
++      if (i > 0)
++         VG_(fprintf)(trace_fp, ",");
++      pg_emit_json_string(trace_fp, globals[i].name);
++   }
++   VG_(fprintf)(trace_fp, "],\n");
++
++   return n_globals > 0;
++}
++
+ /* Try to form some description of DATA_ADDR by looking at the DWARF3
+    debug info we have.  This considers all global variables, and 8
+    frames in the stacks of all threads.  Result is written at the ends

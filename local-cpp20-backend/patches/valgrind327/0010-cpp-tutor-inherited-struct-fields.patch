@@ -1,0 +1,129 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4613,7 +4613,73 @@
+                                     Bool allow_heap_deref,
+                                     Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
+                                     VgFile* trace_fp);
++
++static void pg_emit_struct_fields(const XArray* tyents,
++                                  TyEnt* ent,
++                                  Addr data_addr,
++                                  DiEpoch ep,
++                                  Bool* first_field,
++                                  UInt* field_count,
++                                  Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++                                  VgFile* trace_fp)
++{
++   Word i;
++   XArray* fieldRs;
++
++   if (!ent || ent->tag != Te_TyStOrUn || !ent->Te.TyStOrUn.complete ||
++       !ent->Te.TyStOrUn.isStruct || !ent->Te.TyStOrUn.fieldRs) {
++      return;
++   }
+ 
++   fieldRs = ent->Te.TyStOrUn.fieldRs;
++   for (i = 0; i < VG_(sizeXA)(fieldRs); i++) {
++      UWord fieldR = *(UWord*)VG_(indexXA)(fieldRs, i);
++      TyEnt* field = ML_(TyEnts__index_by_cuOff)(tyents, NULL, fieldR);
++      TyEnt* field_ent;
++      Addr field_addr;
++
++      if (*field_count >= PG_MAX_STRUCT_FIELDS)
++         return;
++
++      if (!field || field->tag != Te_Field || !field->Te.Field.isStruct ||
++          field->Te.Field.nLoc != -1) {
++         continue;
++      }
++
++      field_addr = data_addr + field->Te.Field.pos.offset;
++      field_ent = pg_resolve_display_type(tyents, field->Te.Field.typeR);
++
++      if (!field->Te.Field.name) {
++         if (field_ent && field_ent->tag == Te_TyStOrUn) {
++            pg_emit_struct_fields(tyents, field_ent, field_addr, ep,
++                                  first_field, field_count,
++                                  is_mem_defined_func, trace_fp);
++         }
++         continue;
++      }
++
++      if (!*first_field)
++         VG_(fprintf)(trace_fp, ",\n  ");
++      *first_field = False;
++      (*field_count)++;
++
++      pg_emit_json_string(trace_fp, field->Te.Field.name);
++      VG_(fprintf)(trace_fp, ":");
++      pg_emit_minimal_varinfo(tyents, field->Te.Field.typeR, field_addr,
++                              ep, False, is_mem_defined_func, trace_fp);
++   }
++
++   if (*field_count < PG_MAX_STRUCT_FIELDS && ent->Te.TyStOrUn.typeR != 0) {
++      TyEnt* base = ML_(TyEnts__index_by_cuOff)(tyents, NULL,
++                                                ent->Te.TyStOrUn.typeR);
++      if (base && base->tag != Te_UNKNOWN && ML_(TyEnt__is_type)(base)) {
++         pg_emit_struct_fields(tyents, base, data_addr, ep,
++                               first_field, field_count,
++                               is_mem_defined_func, trace_fp);
++      }
++   }
++}
++
+ static void pg_emit_heap_deref_val(const XArray* tyents, UWord typeR,
+                                    Addr ptr_val, DiEpoch ep,
+                                    Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
+@@ -4784,9 +4850,8 @@
+    }
+ 
+    if (ent->tag == Te_TyStOrUn) {
+-      Word i;
+       Bool first_field = True;
+-      XArray* fieldRs;
++      UInt field_count = 0;
+       const HChar* struct_name;
+ 
+       if (!ent->Te.TyStOrUn.complete || !ent->Te.TyStOrUn.isStruct ||
+@@ -4795,12 +4860,6 @@
+          return;
+       }
+ 
+-      fieldRs = ent->Te.TyStOrUn.fieldRs;
+-      if (VG_(sizeXA)(fieldRs) > PG_MAX_STRUCT_FIELDS) {
+-         pg_emit_unsupported_varinfo(trace_fp, data_addr, "<struct>");
+-         return;
+-      }
+-
+       struct_name = ent->Te.TyStOrUn.name ? ent->Te.TyStOrUn.name
+                                           : "<anonymous>";
+       VG_(fprintf)(trace_fp,
+@@ -4809,26 +4868,8 @@
+       pg_emit_json_string(trace_fp, struct_name);
+       VG_(fprintf)(trace_fp, ", \"val\": {\n  ");
+ 
+-      for (i = 0; i < VG_(sizeXA)(fieldRs); i++) {
+-         UWord fieldR = *(UWord*)VG_(indexXA)(fieldRs, i);
+-         TyEnt* field = ML_(TyEnts__index_by_cuOff)(tyents, NULL, fieldR);
+-         Addr field_addr;
+-
+-         if (!field || field->tag != Te_Field || !field->Te.Field.isStruct ||
+-             field->Te.Field.nLoc != -1 || !field->Te.Field.name) {
+-            continue;
+-         }
+-
+-         if (!first_field)
+-            VG_(fprintf)(trace_fp, ",\n  ");
+-         first_field = False;
+-
+-         field_addr = data_addr + field->Te.Field.pos.offset;
+-         pg_emit_json_string(trace_fp, field->Te.Field.name);
+-         VG_(fprintf)(trace_fp, ":");
+-         pg_emit_minimal_varinfo(tyents, field->Te.Field.typeR, field_addr,
+-                                 ep, False, is_mem_defined_func, trace_fp);
+-      }
++      pg_emit_struct_fields(tyents, ent, data_addr, ep, &first_field,
++                            &field_count, is_mem_defined_func, trace_fp);
+ 
+       VG_(fprintf)(trace_fp, "}}");
+       return;

@@ -3,6 +3,7 @@ set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 URL="http://localhost:5000/visualize.html"
+CPP_IMAGE="${CPP_TUTOR_CPP_IMAGE:-cpp-tutor/opt-cpp-backend-cpp20-sb:local}"
 
 stop_server_on_port() {
   PORT="$1"
@@ -37,9 +38,9 @@ if ! docker info >/dev/null 2>&1; then
   done
 fi
 
-if ! docker image inspect cpp-tutor/opt-cpp-backend-cpp20-sb:local >/dev/null 2>&1; then
-  echo "Missing cpp-tutor/opt-cpp-backend-cpp20-sb:local image."
-  echo "Build it first using the C++20 setup command."
+if ! docker image inspect "$CPP_IMAGE" >/dev/null 2>&1; then
+  echo "Missing $CPP_IMAGE image."
+  echo "Build the stable backend with ./build-cpp20-backend.sh or the experimental backend with ./build-valgrind327-backend.sh."
   exit 1
 fi
 
@@ -59,7 +60,7 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 echo "Starting local C/C++ backend on port 3000..."
-echo "Using local Docker image: cpp-tutor/opt-cpp-backend-cpp20-sb:local"
+echo "Using local Docker image: $CPP_IMAGE"
 sleep 2
 
 (

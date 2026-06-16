@@ -1,0 +1,193 @@
+diff --git a/memcheck/mc_translate.c b/memcheck/mc_translate.c
+index 1fd828d..066bd43 100644
+--- a/memcheck/mc_translate.c
++++ b/memcheck/mc_translate.c
+@@ -39,4 +39,8 @@
+ #include "pub_tool_libcbase.h"
+ 
+ #include "mc_include.h"
++#include "pub_tool_libcfile.h"
++#include "pub_tool_debuginfo.h"
++#include "pub_tool_stacktrace.h"
++#include "pub_tool_threadstate.h"
+ 
+@@ -8865,6 +8869,162 @@ static Bool tmp_is_used_in_PCa_or_HReg ( IRSB* bb, IRTemp tmp )
+    return False;
+ }
+ 
++/* cpp-tutor tracing.  This is the first Valgrind 3.27.x port slice:
++   emit valid step records with line/function/stack metadata.  Variable
++   traversal is intentionally ported in a later patch. */
++#define CPP_TUTOR_MAX_STEPS 5000
++#define CPP_TUTOR_STDOUT_BUF_SIZE (10 * 1024 * 1024)
++
++static Int cpp_tutor_n_steps = 0;
++static HChar cpp_tutor_stdout_buf[CPP_TUTOR_STDOUT_BUF_SIZE + 1];
++
++VG_REGPARM(1) void pg_trace_inst_minimal(Addr ad);
++
++static HChar* cpp_tutor_json_encode_string(const HChar* str)
++{
++   SizeT i;
++   SizeT n = 2;
++   HChar* out;
++   HChar* p;
++
++   for (i = 0; str[i]; i++) {
++      switch (str[i]) {
++         case '"':
++         case '\\':
++         case '\n':
++         case '\r':
++         case '\t':
++            n += 2;
++            break;
++         default:
++            n += 1;
++            break;
++      }
++   }
++
++   out = VG_(malloc)("cpp_tutor_json_encode_string", n + 1);
++   p = out;
++   *p++ = '"';
++   for (i = 0; str[i]; i++) {
++      switch (str[i]) {
++         case '"':
++            *p++ = '\\';
++            *p++ = '"';
++            break;
++         case '\\':
++            *p++ = '\\';
++            *p++ = '\\';
++            break;
++         case '\n':
++            *p++ = '\\';
++            *p++ = 'n';
++            break;
++         case '\r':
++            *p++ = '\\';
++            *p++ = 'r';
++            break;
++         case '\t':
++            *p++ = '\\';
++            *p++ = 't';
++            break;
++         default:
++            *p++ = str[i];
++            break;
++      }
++   }
++   *p++ = '"';
++   *p = 0;
++   return out;
++}
++
++VG_REGPARM(1)
++void pg_trace_inst_minimal(Addr a)
++{
++   const DiEpoch ep = VG_(current_DiEpoch)();
++   const HChar* file;
++   Bool hasfile = VG_(get_filename)(ep, a, &file);
++
++   if (!hasfile || !VG_STREQ(file, pg_source_filename))
++      return;
++
++   cpp_tutor_n_steps++;
++   if (cpp_tutor_n_steps > CPP_TUTOR_MAX_STEPS) {
++      VG_(fprintf)(trace_fp, "MAX_STEPS_EXCEEDED\n");
++      VG_(fclose)(trace_fp);
++      VG_(close)(stdout_fd);
++      VG_(exit)(0);
++   }
++
++   VG_(lseek)(stdout_fd, 0, VKI_SEEK_SET);
++   Int nbytes = VG_(read)(stdout_fd, cpp_tutor_stdout_buf,
++                          CPP_TUTOR_STDOUT_BUF_SIZE);
++   if (nbytes > 0) {
++      if (nbytes > CPP_TUTOR_STDOUT_BUF_SIZE)
++         nbytes = CPP_TUTOR_STDOUT_BUF_SIZE;
++      cpp_tutor_stdout_buf[nbytes] = 0;
++   } else {
++      cpp_tutor_stdout_buf[0] = 0;
++   }
++
++   HChar* stdout_json = cpp_tutor_json_encode_string(cpp_tutor_stdout_buf);
++
++   const HChar* fn;
++   Bool hasfn = VG_(get_fnname)(ep, a, &fn);
++   UInt linenum;
++   Bool haslinenum = VG_(get_linenum)(ep, a, &linenum);
++   Vg_FnNameKind kind = VG_(get_fnname_kind_from_IP)(ep, a);
++
++   VG_(fprintf)(trace_fp, "=== pg_trace_inst ===\n");
++   VG_(fprintf)(trace_fp, "STDOUT: %s\n", stdout_json);
++   VG_(free)(stdout_json);
++
++   VG_(fprintf)(trace_fp, "{\n");
++   VG_(fprintf)(trace_fp,
++                "\"func_name\": \"%s\", \"line\": %d, \"IP\": \"%p\", \"kind\": %d, ",
++                hasfn ? fn : "???",
++                haslinenum ? linenum : -999,
++                (void*)a,
++                (int)kind);
++
++   Addr ips[100];
++   Addr sps[100];
++   Addr fps[100];
++   UInt stack_depth = VG_(get_StackTrace)(VG_(get_running_tid)(),
++                                          ips, 100, sps, fps, 0);
++
++   VG_(fprintf)(trace_fp, "\"stack\": [\n");
++   Bool first_stack_entry = True;
++   UInt i;
++   for (i = 0; i < stack_depth; i++) {
++      Addr cur_ip = ips[i];
++      Addr cur_sp = sps[i];
++      Addr cur_fp = fps[i];
++      Vg_FnNameKind ip_kind = VG_(get_fnname_kind_from_IP)(ep, cur_ip);
++
++      if (ip_kind == Vg_FnNameBelowMain)
++         break;
++
++      if (first_stack_entry)
++         first_stack_entry = False;
++      else
++         VG_(fprintf)(trace_fp, ",\n");
++
++      const HChar* cur_fn;
++      Bool cur_hasfn = VG_(get_fnname)(ep, cur_ip, &cur_fn);
++      UInt cur_linenum;
++      Bool cur_haslinenum = VG_(get_linenum)(ep, cur_ip, &cur_linenum);
++
++      VG_(fprintf)(trace_fp,
++                   "{\"func_name\":\"%s\", \"line\": %d, \"SP\": \"%p\", \"FP\": \"%p\", \"locals\": {}, \"ordered_varnames\": []}",
++                   cur_hasfn ? cur_fn : "???",
++                   cur_haslinenum ? cur_linenum : -999,
++                   (void*)cur_sp,
++                   (void*)cur_fp);
++   }
++   VG_(fprintf)(trace_fp, "]\n");
++   VG_(fprintf)(trace_fp, "}\n");
++}
++
+ IRSB* MC_(instrument) ( VgCallbackClosure* closure,
+                         IRSB* sb_in, 
+                         const VexGuestLayout* layout, 
+@@ -9090,8 +9250,15 @@ IRSB* MC_(instrument) ( VgCallbackClosure* closure,
+             complainIfUndefined( &mce, st->Ist.Exit.guard, NULL );
+             break;
+ 
+-         case Ist_IMark:
++         case Ist_IMark: {
++            IRDirty* di;
++            di = unsafeIRDirty_0_N(1/*regparms*/,
++                 "pg_trace_inst_minimal",
++                 &pg_trace_inst_minimal,
++                 mkIRExprVec_1(IRExpr_Const(IRConst_U64(st->Ist.IMark.addr))));
++            stmt('V', &mce, IRStmt_Dirty(di));
+             break;
++         }
+ 
+          case Ist_NoOp:
+          case Ist_MBE:

@@ -1,0 +1,99 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -189,6 +189,95 @@ def get_std_string_pointer(obj):
+ 
+     return None
+ 
+ 
++def parse_hex_ptr(val):
++    if not isinstance(val, basestring):
++        return None
++    if not val.startswith('0x'):
++        return None
++    try:
++        return int(val, 16)
++    except ValueError:
++        return None
++
++
++def top_level_template_arg(type_name):
++    start = type_name.find('vector<')
++    if start < 0:
++        return None
++    start += len('vector<')
++    depth = 0
++    for i in range(start, len(type_name)):
++        c = type_name[i]
++        if c == '<':
++            depth += 1
++        elif c == '>':
++            if depth == 0:
++                return type_name[start:i].strip()
++            depth -= 1
++        elif c == ',' and depth == 0:
++            return type_name[start:i].strip()
++    return None
++
++
++def sizeof_cpp_type(type_name):
++    normalized = (type_name or '').strip()
++    if normalized in ('char', 'signed char', 'unsigned char', 'bool'):
++        return 1
++    if normalized in ('short', 'short int', 'unsigned short', 'unsigned short int'):
++        return 2
++    if normalized in ('int', 'unsigned int', 'float'):
++        return 4
++    if normalized in ('long', 'long int', 'unsigned long', 'unsigned long int',
++                      'long long', 'long long int', 'unsigned long long',
++                      'unsigned long long int', 'double'):
++        return 8
++    return None
++
++
++def get_std_vector_summary(obj):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'vector<' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    impl = members.get('_M_impl')
++    if not impl or impl.get('kind') != 'struct':
++        return None
++
++    impl_members = impl.get('val') or {}
++    start = impl_members.get('_M_start')
++    finish = impl_members.get('_M_finish')
++    end = impl_members.get('_M_end_of_storage')
++    if not start or not finish or not end:
++        return None
++    if start.get('kind') != 'pointer' or finish.get('kind') != 'pointer' or end.get('kind') != 'pointer':
++        return None
++
++    elem_type = top_level_template_arg(type_name) or 'element'
++    elem_size = sizeof_cpp_type(elem_type)
++    start_addr = parse_hex_ptr(start.get('val'))
++    finish_addr = parse_hex_ptr(finish.get('val'))
++    end_addr = parse_hex_ptr(end.get('val'))
++    size = '<UNINITIALIZED>'
++    capacity = '<UNINITIALIZED>'
++    if elem_size and start_addr is not None and finish_addr is not None and finish_addr >= start_addr:
++        size = (finish_addr - start_addr) // elem_size
++    if elem_size and start_addr is not None and end_addr is not None and end_addr >= start_addr:
++        capacity = (end_addr - start_addr) // elem_size
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        'std::vector<' + elem_type + '>',
++        ['size', ['C_DATA', finish['addr'], 'size_t', size]],
++        ['capacity', ['C_DATA', end['addr'], 'size_t', capacity]],
++        ['data', ['C_DATA', start['addr'], 'pointer', start.get('val')]]
++    ]
++
++
+ # returns an encoded value in OPT format and possibly mutates the heap
+ def encode_value(obj, heap):
+     if obj['kind'] == 'base':

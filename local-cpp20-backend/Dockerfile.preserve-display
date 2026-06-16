@@ -29,53 +29,40 @@ def char_literal(ch):
 
 
 def rewrite_simple_string_literals(code):
-    known = {}
+    # Keep real std::string objects so the backend can visualize mutations.
+    return code, {}
 
-    pattern = re.compile(
-        r'\bstd::string\s+(?P<name>[A-Za-z_]\w*)\s*=\s*(?P<literal>"[^"]*")\s*;'
+
+def rewrite_string_predicates(code, known_strings):
+    predicate_pattern = re.compile(
+        r'(?P<obj>\b[A-Za-z_]\w*)\.(?P<method>starts_with|ends_with|contains)\s*\((?P<arg>"[^"]*")\)'
     )
 
     def repl(match):
-        name = match.group('name')
-        literal = match.group('literal')
-        known[name] = literal[1:-1]
-        return 'const char* %s = %s;' % (name, literal)
-
-    rewritten = pattern.sub(repl, code)
-    return rewritten, known
-
-
-def rewrite_string_starts_ends_with(code, known_strings):
-    starts_pattern = re.compile(
-        r'(?P<obj>\b[A-Za-z_]\w*)\.starts_with\s*\((?P<arg>"[^"]*")\)'
-    )
-
-    ends_pattern = re.compile(
-        r'(?P<obj>\b[A-Za-z_]\w*)\.ends_with\s*\((?P<arg>"[^"]*")\)'
-    )
-
-    def starts_repl(match):
         obj = match.group('obj')
-        prefix = match.group('arg')[1:-1]
+        method = match.group('method')
+        arg = match.group('arg')
+        literal = arg[1:-1]
 
-        if obj not in known_strings:
-            return match.group(0)
+        if obj in known_strings:
+            text_value = known_strings[obj]
 
-        text_value = known_strings[obj]
-        return 'true' if text_value.startswith(prefix) else 'false'
+            if method == 'starts_with':
+                return 'true' if text_value.startswith(literal) else 'false'
+            if method == 'ends_with':
+                return 'true' if text_value.endswith(literal) else 'false'
+            return 'true' if literal in text_value else 'false'
 
-    def ends_repl(match):
-        obj = match.group('obj')
-        suffix = match.group('arg')[1:-1]
+        if method == 'starts_with':
+            return '(std::string(%s).rfind(%s, 0) == 0)' % (obj, arg)
+        if method == 'ends_with':
+            return '(std::string(%s).size() >= std::string(%s).size() && std::string(%s).compare(std::string(%s).size() - std::string(%s).size(), std::string(%s).size(), %s) == 0)' % (
+                obj, arg, obj, obj, arg, arg, arg
+            )
 
-        if obj not in known_strings:
-            return match.group(0)
+        return '(std::string(%s).find(%s) != std::string::npos)' % (obj, arg)
 
-        text_value = known_strings[obj]
-        return 'true' if text_value.endswith(suffix) else 'false'
-
-    code = starts_pattern.sub(starts_repl, code)
-    code = ends_pattern.sub(ends_repl, code)
+    code = predicate_pattern.sub(repl, code)
 
     return code
 
@@ -109,19 +96,494 @@ def rewrite_ssize(code):
 def rewrite_safe_ranges(code):
     code = code.replace('#include <ranges>', '// cpp-tutor: <ranges> rewritten for local visualizer')
 
+    one_range_algorithms = (
+        'sort', 'stable_sort', 'reverse', 'shuffle', 'unique',
+        'is_sorted', 'is_heap', 'make_heap', 'pop_heap', 'push_heap', 'sort_heap'
+    )
+
+    for name in one_range_algorithms:
+        code = re.sub(
+            r'std::ranges::%s\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)' % name,
+            lambda m, name=name: 'std::%s(%s.begin(), %s.end())' % (
+                name, m.group('c'), m.group('c')
+            ),
+            code
+        )
+
+    for name in (
+        'find', 'count', 'binary_search', 'lower_bound', 'upper_bound',
+        'min_element', 'max_element', 'is_sorted_until', 'adjacent_find'
+    ):
+        code = re.sub(
+            r'std::ranges::%s\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<value>[^;\n]+?)\s*\)' % name,
+            lambda m, name=name: 'std::%s(%s.begin(), %s.end(), %s)' % (
+                name, m.group('c'), m.group('c'), m.group('value')
+            ),
+            code
+        )
+
+    for name in ('min_element', 'max_element', 'is_sorted_until', 'adjacent_find'):
+        code = re.sub(
+            r'std::ranges::%s\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)' % name,
+            lambda m, name=name: 'std::%s(%s.begin(), %s.end())' % (
+                name, m.group('c'), m.group('c')
+            ),
+            code
+        )
+
+    for name in ('all_of', 'any_of', 'none_of', 'find_if', 'find_if_not', 'count_if', 'for_each'):
+        code = re.sub(
+            r'std::ranges::%s\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<pred>(?:\[[^\]]*\]\s*\([^)]*\)\s*\{[^}]*\}|[^)\n]+))\s*\)' % name,
+            lambda m, name=name: 'std::%s(%s.begin(), %s.end(), %s)' % (
+                name, m.group('c'), m.group('c'), m.group('pred')
+            ),
+            code
+        )
+
+    for name in ('fill', 'replace'):
+        code = re.sub(
+            r'std::ranges::%s\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<args>[^;\n]+?)\s*\)' % name,
+            lambda m, name=name: 'std::%s(%s.begin(), %s.end(), %s)' % (
+                name, m.group('c'), m.group('c'), m.group('args')
+            ),
+            code
+        )
+
     code = re.sub(
-        r'std::ranges::sort\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)',
-        lambda m: 'std::sort(%s.begin(), %s.end())' % (m.group('c'), m.group('c')),
+        r'std::ranges::copy\s*\(\s*(?P<src>[A-Za-z_]\w*)\s*,\s*(?P<dest>[^;\n]+?)\s*\)',
+        lambda m: 'std::copy(%s.begin(), %s.end(), %s)' % (
+            m.group('src'), m.group('src'), m.group('dest')
+        ),
         code
     )
 
     code = re.sub(
-        r'std::ranges::reverse\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)',
-        lambda m: 'std::reverse(%s.begin(), %s.end())' % (m.group('c'), m.group('c')),
+        r'std::ranges::copy_if\s*\(\s*(?P<src>[A-Za-z_]\w*)\s*,\s*(?P<dest>[^,\n]+?)\s*,\s*(?P<pred>(?:\[[^\]]*\]\s*\([^)]*\)\s*\{[^}]*\}|[^)\n]+))\s*\)',
+        lambda m: 'std::copy_if(%s.begin(), %s.end(), %s, %s)' % (
+            m.group('src'), m.group('src'), m.group('dest'), m.group('pred')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::ranges::transform\s*\(\s*(?P<src>[A-Za-z_]\w*)\s*,\s*(?P<dest>[^,\n]+?)\s*,\s*(?P<func>(?:\[[^\]]*\]\s*\([^)]*\)\s*\{[^}]*\}|[^)\n]+))\s*\)',
+        lambda m: 'std::transform(%s.begin(), %s.end(), %s, %s)' % (
+            m.group('src'), m.group('src'), m.group('dest'), m.group('func')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::ranges::equal\s*\(\s*(?P<a>[A-Za-z_]\w*)\s*,\s*(?P<b>[A-Za-z_]\w*)\s*\)',
+        lambda m: 'std::equal(%s.begin(), %s.end(), %s.begin(), %s.end())' % (
+            m.group('a'), m.group('a'), m.group('b'), m.group('b')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::ranges::includes\s*\(\s*(?P<a>[A-Za-z_]\w*)\s*,\s*(?P<b>[A-Za-z_]\w*)\s*\)',
+        lambda m: 'std::includes(%s.begin(), %s.end(), %s.begin(), %s.end())' % (
+            m.group('a'), m.group('a'), m.group('b'), m.group('b')
+        ),
+        code
+    )
+
+    for name in ('size', 'empty', 'data'):
+        code = re.sub(
+            r'std::ranges::%s\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)' % name,
+            lambda m, name=name: '%s.%s()' % (m.group('c'), name),
+            code
+        )
+
+    code = re.sub(
+        r'std::ranges::distance\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)',
+        lambda m: 'static_cast<long long>(%s.size())' % m.group('c'),
+        code
+    )
+
+    code = re.sub(
+        r'std::ranges::contains\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<value>[^;\n]+?)\s*\)',
+        lambda m: '(std::find(%s.begin(), %s.end(), %s) != %s.end())' % (
+            m.group('c'), m.group('c'), m.group('value'), m.group('c')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::ranges::min\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)',
+        lambda m: '(*std::min_element(%s.begin(), %s.end()))' % (m.group('c'), m.group('c')),
+        code
+    )
+
+    code = re.sub(
+        r'std::ranges::max\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*\)',
+        lambda m: '(*std::max_element(%s.begin(), %s.end()))' % (m.group('c'), m.group('c')),
         code
     )
 
     return code
+
+
+def rewrite_iota_view_for_loops(code):
+    pattern = re.compile(
+        r'^(?P<indent>\s*)for\s*\(\s*'
+        r'(?P<type>(?:int|long|long long|size_t|auto))\s+'
+        r'(?P<name>[A-Za-z_]\w*)\s*:\s*'
+        r'std::views::iota\s*\(\s*(?P<start>[^,\n]+?)\s*,\s*(?P<stop>[^)\n]+?)\s*\)\s*'
+        r'\)\s*(?P<brace>\{?)\s*(?P<tail>//.*)?(?P<nl>\r?\n?)$',
+        re.MULTILINE
+    )
+
+    def repl(match):
+        indent = match.group('indent')
+        typ = match.group('type')
+        name = match.group('name')
+        start = match.group('start')
+        stop = match.group('stop')
+        brace = match.group('brace')
+        tail = match.group('tail') or ''
+        nl = match.group('nl') or '\n'
+        return '%sfor (%s %s = %s; %s < %s; ++%s)%s%s%s' % (
+            indent, typ, name, start, name, stop, name,
+            ' {' if brace else '',
+            (' ' + tail) if tail else '',
+            nl
+        )
+
+    return pattern.sub(repl, code)
+
+
+def rewrite_reverse_view_for_loops(code):
+    lines = code.splitlines(True)
+    out = []
+    counter = 0
+
+    pattern = re.compile(
+        r'^(?P<indent>\s*)for\s*\(\s*'
+        r'(?P<type>(?:auto|int|long|long long|size_t|[A-Za-z_]\w*(?:::[A-Za-z_]\w*)?))\s+'
+        r'(?P<name>[A-Za-z_]\w*)\s*:\s*'
+        r'(?:(?:std::views::reverse\s*\(\s*(?P<c1>[A-Za-z_]\w*)\s*\))|(?:(?P<c2>[A-Za-z_]\w*)\s*\|\s*std::views::reverse))\s*'
+        r'\)\s*(?P<brace>\{?)\s*(?P<tail>//.*)?(?P<nl>\r?\n?)$'
+    )
+
+    for line in lines:
+        match = pattern.match(line)
+
+        if not match:
+            out.append(line)
+            continue
+
+        counter += 1
+        indent = match.group('indent')
+        typ = match.group('type')
+        name = match.group('name')
+        container = match.group('c1') or match.group('c2')
+        brace = match.group('brace')
+        tail = match.group('tail') or ''
+        nl = match.group('nl') or '\n'
+        it_name = '__cpp_tutor_reverse_it_%d' % counter
+
+        declaration = '%s %s = *%s;' % (typ, name, it_name)
+
+        if brace:
+            out.append('%sfor (auto %s = %s.rbegin(); %s != %s.rend(); ++%s) { %s%s%s' % (
+                indent, it_name, container, it_name, container, it_name,
+                declaration, (' ' + tail) if tail else '', nl
+            ))
+        else:
+            out.append('%sfor (auto %s = %s.rbegin(); %s != %s.rend(); ++%s)%s%s' % (
+                indent, it_name, container, it_name, container, it_name,
+                (' ' + tail) if tail else '', nl
+            ))
+            out.append('%s  %s%s' % (indent, declaration, nl))
+
+    return ''.join(out)
+
+
+def rewrite_filter_transform_view_for_loops(code):
+    lines = code.splitlines(True)
+    out = []
+    counter = 0
+    loop_type = r'(?:const\s+)?(?:auto|int|long|long long|size_t|[A-Za-z_]\w*(?:::[A-Za-z_]\w*)?)(?:\s*[&*])?'
+    lambda_expr = r'\[[^\]]*\]\s*\([^)]*\)\s*(?:mutable\s*)?\{[^}]*\}'
+
+    pattern = re.compile(
+        r'^(?P<indent>\s*)for\s*\(\s*'
+        r'(?P<type>' + loop_type + r')\s+'
+        r'(?P<name>[A-Za-z_]\w*)\s*:\s*'
+        r'(?:(?:std::views::(?P<kind1>filter|transform)\s*\(\s*(?P<c1>[A-Za-z_]\w*)\s*,\s*(?P<fn1>' + lambda_expr + r')\s*\))|'
+        r'(?:(?P<c2>[A-Za-z_]\w*)\s*\|\s*std::views::(?P<kind2>filter|transform)\s*\(\s*(?P<fn2>' + lambda_expr + r')\s*\)))\s*'
+        r'\)\s*(?P<brace>\{)\s*(?P<tail>//.*)?(?P<nl>\r?\n?)$'
+    )
+
+    for line in lines:
+        match = pattern.match(line)
+
+        if not match:
+            out.append(line)
+            continue
+
+        counter += 1
+        indent = match.group('indent')
+        typ = match.group('type')
+        name = match.group('name')
+        kind = match.group('kind1') or match.group('kind2')
+        container = match.group('c1') or match.group('c2')
+        function = match.group('fn1') or match.group('fn2')
+        tail = match.group('tail') or ''
+        nl = match.group('nl') or '\n'
+
+        if kind == 'filter':
+            out.append('%sfor (%s %s : %s) { if (!(%s)(%s)) continue;%s%s' % (
+                indent, typ, name, container, function, name,
+                (' ' + tail) if tail else '', nl
+            ))
+        else:
+            raw_name = '__cpp_tutor_transform_value_%d' % counter
+            declaration = '%s %s = (%s)(%s);' % (typ, name, function, raw_name)
+            out.append('%sfor (auto %s : %s) { %s%s%s' % (
+                indent, raw_name, container, declaration,
+                (' ' + tail) if tail else '', nl
+            ))
+
+    return ''.join(out)
+
+
+def rewrite_modern_std_helpers(code):
+    code = code.replace('#include <concepts>', '// cpp-tutor: <concepts> not needed after local visualizer rewrites')
+    code = code.replace('#include <bit>', '// cpp-tutor: <bit> helpers rewritten for local visualizer')
+
+    code = re.sub(
+        r'std::cmp_(?P<op>equal|not_equal|less|less_equal|greater|greater_equal)\s*\(\s*(?P<a>[^,\n]+?)\s*,\s*(?P<b>[^;\n]+?)\s*\)',
+        lambda m: '__cpp_tutor_cmp_%s(%s, %s)' % (m.group('op'), m.group('a'), m.group('b')),
+        code
+    )
+
+    code = re.sub(
+        r'std::to_underlying\s*\(\s*(?P<value>[^;\n]+?)\s*\)',
+        lambda m: 'static_cast<int>(%s)' % m.group('value'),
+        code
+    )
+
+    code = re.sub(
+        r'std::midpoint\s*\(\s*(?P<a>[^,\n]+?)\s*,\s*(?P<b>[^;\n]+?)\s*\)',
+        lambda m: '((%s) + ((%s) - (%s)) / 2)' % (m.group('a'), m.group('b'), m.group('a')),
+        code
+    )
+
+    code = re.sub(
+        r'std::lerp\s*\(\s*(?P<a>[^,\n]+?)\s*,\s*(?P<b>[^,\n]+?)\s*,\s*(?P<t>[^;\n]+?)\s*\)',
+        lambda m: '((%s) + ((%s) - (%s)) * (%s))' % (
+            m.group('a'), m.group('b'), m.group('a'), m.group('t')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::clamp\s*\(\s*(?P<v>[^,\n]+?)\s*,\s*(?P<lo>[^,\n]+?)\s*,\s*(?P<hi>[^;\n]+?)\s*\)',
+        lambda m: '((%s) < (%s) ? (%s) : ((%s) > (%s) ? (%s) : (%s)))' % (
+            m.group('v'), m.group('lo'), m.group('lo'),
+            m.group('v'), m.group('hi'), m.group('hi'), m.group('v')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::gcd\s*\(\s*(?P<a>[^,\n]+?)\s*,\s*(?P<b>[^;\n]+?)\s*\)',
+        lambda m: '__cpp_tutor_gcd(%s, %s)' % (m.group('a'), m.group('b')),
+        code
+    )
+
+    code = re.sub(
+        r'std::lcm\s*\(\s*(?P<a>[^,\n]+?)\s*,\s*(?P<b>[^;\n]+?)\s*\)',
+        lambda m: '__cpp_tutor_lcm(%s, %s)' % (m.group('a'), m.group('b')),
+        code
+    )
+
+    code = re.sub(
+        r'std::reduce\s*\(',
+        'std::accumulate(',
+        code
+    )
+
+    code = re.sub(
+        r'auto\s+(?P<name>[A-Za-z_]\w*)\s*=\s*std::ranges::remove\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<value>[^;\n]+?)\s*\)\s*;',
+        lambda m: 'auto %s = std::remove(%s.begin(), %s.end(), %s);' % (
+            m.group('name'), m.group('c'), m.group('c'), m.group('value')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'auto\s+(?P<name>[A-Za-z_]\w*)\s*=\s*std::ranges::remove_if\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<pred>(?:\[[^\]]*\]\s*\([^)]*\)\s*\{[^}]*\}|[^)\n]+))\s*\)\s*;',
+        lambda m: 'auto %s = std::remove_if(%s.begin(), %s.end(), %s);' % (
+            m.group('name'), m.group('c'), m.group('c'), m.group('pred')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'(?P<c>[A-Za-z_]\w*)\.erase\s*\(\s*(?P<it>[A-Za-z_]\w*)\.begin\s*\(\s*\)\s*,\s*(?P=it)\.end\s*\(\s*\)\s*\)\s*;',
+        lambda m: '%s.erase(%s, %s.end());' % (m.group('c'), m.group('it'), m.group('c')),
+        code
+    )
+
+    code = re.sub(
+        r'std::popcount\s*\(\s*(?P<v>[^)\n]+?)\s*\)',
+        lambda m: '__builtin_popcount(%s)' % m.group('v'),
+        code
+    )
+
+    code = re.sub(
+        r'std::has_single_bit\s*\(\s*(?P<v>[^)\n]+?)\s*\)',
+        lambda m: '((%s) != 0 && (((%s) & ((%s) - 1)) == 0))' % (
+            m.group('v'), m.group('v'), m.group('v')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::bit_width\s*\(\s*(?P<v>[^)\n]+?)\s*\)',
+        lambda m: '__cpp_tutor_bit_width(%s)' % m.group('v'),
+        code
+    )
+
+    code = re.sub(
+        r'std::bit_floor\s*\(\s*(?P<v>[^)\n]+?)\s*\)',
+        lambda m: '__cpp_tutor_bit_floor(%s)' % m.group('v'),
+        code
+    )
+
+    code = re.sub(
+        r'std::bit_ceil\s*\(\s*(?P<v>[^)\n]+?)\s*\)',
+        lambda m: '__cpp_tutor_bit_ceil(%s)' % m.group('v'),
+        code
+    )
+
+    code = re.sub(
+        r'(?P<obj>\b[A-Za-z_]\w*)\.contains\s*\(\s*(?P<key>(?!"[^"]*")[^)\n]+)\)',
+        lambda m: '(%s.find(%s) != %s.end())' % (m.group('obj'), m.group('key'), m.group('obj')),
+        code
+    )
+
+    code = re.sub(
+        r'std::erase\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<value>[^;\n]+?)\s*\)\s*;',
+        lambda m: '%s.erase(std::remove(%s.begin(), %s.end(), %s), %s.end());' % (
+            m.group('c'), m.group('c'), m.group('c'), m.group('value'), m.group('c')
+        ),
+        code
+    )
+
+    code = re.sub(
+        r'std::erase_if\s*\(\s*(?P<c>[A-Za-z_]\w*)\s*,\s*(?P<pred>(?:\[[^\]]*\]\s*\([^)]*\)\s*\{[^}]*\}|[^\n]+))\s*\)\s*;',
+        lambda m: '%s.erase(std::remove_if(%s.begin(), %s.end(), %s), %s.end());' % (
+            m.group('c'), m.group('c'), m.group('c'), m.group('pred'), m.group('c')
+        ),
+        code
+    )
+
+    return code
+
+
+def cmp_helper_source():
+    return '''
+template <class T, class U>
+bool __cpp_tutor_cmp_less(T t, U u) {
+    if (t < 0) {
+        return u >= 0;
+    }
+    if (u < 0) {
+        return false;
+    }
+    return t < u;
+}
+
+template <class T, class U>
+bool __cpp_tutor_cmp_equal(T t, U u) {
+    return !__cpp_tutor_cmp_less(t, u) && !__cpp_tutor_cmp_less(u, t);
+}
+
+template <class T, class U>
+bool __cpp_tutor_cmp_not_equal(T t, U u) {
+    return !__cpp_tutor_cmp_equal(t, u);
+}
+
+template <class T, class U>
+bool __cpp_tutor_cmp_less_equal(T t, U u) {
+    return !__cpp_tutor_cmp_less(u, t);
+}
+
+template <class T, class U>
+bool __cpp_tutor_cmp_greater(T t, U u) {
+    return __cpp_tutor_cmp_less(u, t);
+}
+
+template <class T, class U>
+bool __cpp_tutor_cmp_greater_equal(T t, U u) {
+    return !__cpp_tutor_cmp_less(t, u);
+}
+'''
+
+
+def math_helper_source():
+    return '''
+template <class T>
+T __cpp_tutor_abs_value(T value) {
+    return value < 0 ? -value : value;
+}
+
+template <class T, class U>
+long long __cpp_tutor_gcd(T a, U b) {
+    long long x = __cpp_tutor_abs_value(static_cast<long long>(a));
+    long long y = __cpp_tutor_abs_value(static_cast<long long>(b));
+    while (y != 0) {
+        long long r = x % y;
+        x = y;
+        y = r;
+    }
+    return x;
+}
+
+template <class T, class U>
+long long __cpp_tutor_lcm(T a, U b) {
+    long long x = static_cast<long long>(a);
+    long long y = static_cast<long long>(b);
+    if (x == 0 || y == 0) {
+        return 0;
+    }
+    return __cpp_tutor_abs_value((x / __cpp_tutor_gcd(x, y)) * y);
+}
+
+template <class T>
+int __cpp_tutor_bit_width(T value) {
+    unsigned long long x = static_cast<unsigned long long>(value);
+    int width = 0;
+    while (x != 0) {
+        ++width;
+        x >>= 1;
+    }
+    return width;
+}
+
+template <class T>
+unsigned long long __cpp_tutor_bit_floor(T value) {
+    unsigned long long x = static_cast<unsigned long long>(value);
+    if (x == 0) {
+        return 0;
+    }
+    return 1ULL << (__cpp_tutor_bit_width(x) - 1);
+}
+
+template <class T>
+unsigned long long __cpp_tutor_bit_ceil(T value) {
+    unsigned long long x = static_cast<unsigned long long>(value);
+    if (x <= 1) {
+        return 1;
+    }
+    return 1ULL << __cpp_tutor_bit_width(x - 1);
+}
+'''
 
 
 def rewrite_structured_binding_for_loops(code):
@@ -218,6 +680,14 @@ def rewrite_standalone_structured_bindings_safely(code):
 def add_needed_includes(original_code, rewritten_code):
     prefix = ''
 
+    if 'std::cmp_' in original_code:
+        prefix += cmp_helper_source()
+
+    if any(token in original_code for token in (
+        'std::gcd(', 'std::lcm(', 'std::bit_width(', 'std::bit_floor(', 'std::bit_ceil('
+    )):
+        prefix += math_helper_source()
+
     if ('auto [' in original_code or 'const auto [' in original_code or 'auto& [' in original_code or 'auto&& [' in original_code):
         if '#include <tuple>' not in rewritten_code:
             prefix += '#include <tuple>\n'
@@ -226,7 +696,86 @@ def add_needed_includes(original_code, rewritten_code):
         if '#include <algorithm>' not in rewritten_code:
             prefix += '#include <algorithm>\n'
 
+    if any(token in original_code for token in (
+        '.starts_with(', '.ends_with(', '.contains(', 'std::cmp_', 'std::to_underlying(',
+        'std::midpoint(', 'std::lerp(', 'std::clamp(', 'std::erase(', 'std::erase_if(',
+        'std::ranges::'
+    )):
+        if '#include <algorithm>' not in rewritten_code:
+            prefix += '#include <algorithm>\n'
+        if '#include <string>' not in rewritten_code:
+            prefix += '#include <string>\n'
+
+    if any(token in original_code for token in (
+        'std::ranges::copy', 'std::ranges::copy_if', 'std::ranges::transform',
+        'back_inserter(', 'std::back_inserter('
+    )):
+        if '#include <iterator>' not in rewritten_code:
+            prefix += '#include <iterator>\n'
+
+    if prefix:
+        prefix += '#line 1\n'
+
     return prefix + rewritten_code
+
+
+def is_synthetic_frame(frame):
+    return '__cpp_tutor_' in frame.get('func_name', '')
+
+
+def is_internal_frame(frame):
+    func_name = frame.get('func_name', '')
+    return (
+        func_name.startswith('std::') or
+        func_name.startswith('__gnu_cxx::') or
+        func_name.startswith('bool __gnu_cxx::') or
+        func_name.startswith('__static_initialization_and_destruction_0') or
+        func_name.startswith('_GLOBAL__sub_I_') or
+        func_name == '__libc_csu_init'
+    )
+
+
+def filter_synthetic_trace(data):
+    original_lines = len(data.get('code', '').split('\n'))
+    filtered_trace = []
+
+    for entry in data.get('trace', []):
+        if '__cpp_tutor_' in entry.get('func_name', ''):
+            continue
+        if is_internal_frame(entry):
+            continue
+        line = entry.get('line')
+        if isinstance(line, int) and line > original_lines:
+            continue
+
+        stack = entry.get('stack_to_render')
+        if stack:
+            visible_stack = []
+            for frame in stack:
+                if is_synthetic_frame(frame) or is_internal_frame(frame):
+                    continue
+
+                encoded_locals = frame.get('encoded_locals')
+                if encoded_locals:
+                    for name in list(encoded_locals.keys()):
+                        if name.startswith('__cpp_tutor_'):
+                            del encoded_locals[name]
+
+                ordered_varnames = frame.get('ordered_varnames')
+                if ordered_varnames:
+                    frame['ordered_varnames'] = [
+                        name for name in ordered_varnames
+                        if not name.startswith('__cpp_tutor_')
+                    ]
+
+                visible_stack.append(frame)
+
+            entry['stack_to_render'] = visible_stack
+
+        filtered_trace.append(entry)
+
+    data['trace'] = filtered_trace
+    return data
 
 
 def rewrite_code(code):
@@ -234,10 +783,14 @@ def rewrite_code(code):
 
     rewritten = rewrite_numbers(rewritten)
     rewritten = rewrite_ssize(rewritten)
+    rewritten = rewrite_modern_std_helpers(rewritten)
 
     rewritten, known_strings = rewrite_simple_string_literals(rewritten)
-    rewritten = rewrite_string_starts_ends_with(rewritten, known_strings)
+    rewritten = rewrite_string_predicates(rewritten, known_strings)
 
+    rewritten = rewrite_iota_view_for_loops(rewritten)
+    rewritten = rewrite_reverse_view_for_loops(rewritten)
+    rewritten = rewrite_filter_transform_view_for_loops(rewritten)
     rewritten = rewrite_structured_binding_for_loops(rewritten)
     rewritten = rewrite_standalone_structured_bindings_safely(rewritten)
     rewritten = rewrite_safe_ranges(rewritten)
@@ -267,6 +820,7 @@ try:
 
     if rewritten_code != original_code:
         data['code'] = original_code
+        data = filter_synthetic_trace(data)
 
     sys.stdout.write(json.dumps(data))
 except Exception:

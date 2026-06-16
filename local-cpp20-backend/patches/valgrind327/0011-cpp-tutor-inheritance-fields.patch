@@ -1,0 +1,65 @@
+--- a/coregrind/m_debuginfo/readdwarf3.c
++++ b/coregrind/m_debuginfo/readdwarf3.c
+@@ -4325,8 +4325,62 @@
+       }
+       else {
+          /* don't know how to handle any other variants just now */
++         goto_bad_DIE;
++      }
++   }
++
++   if (dtag == DW_TAG_inheritance) {
++      Bool parent_is_struct;
++      VG_(memset)( &fieldE, 0, sizeof(fieldE) );
++      fieldE.cuOff = posn;
++      fieldE.tag   = Te_Field;
++      fieldE.Te.Field.typeR = D3_INVALID_CUOFF;
++      fieldE.Te.Field.nLoc = -1;
++      fieldE.Te.Field.pos.offset = 0;
++      nf_i = 0;
++      while (True) {
++         DW_AT   attr = (DW_AT)  abbv->nf[nf_i].at_name;
++         DW_FORM form = (DW_FORM)abbv->nf[nf_i].at_form;
++         const name_form *nf = &abbv->nf[nf_i];
++         nf_i++;
++         if (attr == 0 && form == 0) break;
++         get_Form_contents( &cts, cc, c_die, False/*td3*/, nf );
++         if (attr == DW_AT_type && cts.szB > 0) {
++            fieldE.Te.Field.typeR
++               = cook_die_using_form( cc, (UWord)cts.u.val, form );
++         }
++         if (attr == DW_AT_data_member_location && cts.szB > 0) {
++            fieldE.Te.Field.nLoc = -1;
++            fieldE.Te.Field.pos.offset = cts.u.val;
++         }
++         if (attr == DW_AT_data_member_location && cts.szB <= 0) {
++            fieldE.Te.Field.nLoc = (UWord)(-cts.szB);
++            fieldE.Te.Field.pos.loc
++               = ML_(cur_read_memdup)( cts.u.cur,
++                                       (SizeT)fieldE.Te.Field.nLoc,
++                                       "di.readdwarf3.ptD.inheritance.1" );
++         }
++      }
++      if (typestack_is_empty(parser)) goto_bad_DIE;
++      vg_assert(ML_(TyEnt__is_type)(&parser->qparentE[parser->sp]));
++      vg_assert(parser->qparentE[parser->sp].cuOff != D3_INVALID_CUOFF);
++      if (level != parser->qlevel[parser->sp]+1) goto_bad_DIE;
++      if (parser->qparentE[parser->sp].tag != Te_TyStOrUn) goto_bad_DIE;
++      parent_is_struct
++         = parser->qparentE[parser->sp].Te.TyStOrUn.isStruct;
++      if (fieldE.Te.Field.typeR == D3_INVALID_CUOFF)
+          goto_bad_DIE;
++      if (!parent_is_struct) {
++         if (fieldE.Te.Field.nLoc > 0)
++            ML_(dinfo_free)(fieldE.Te.Field.pos.loc);
++         fieldE.Te.Field.pos.loc = NULL;
++         fieldE.Te.Field.nLoc = 0;
+       }
++      fieldE.Te.Field.isStruct = parent_is_struct;
++      vg_assert(parser->qparentE[parser->sp].Te.TyStOrUn.fieldRs);
++      VG_(addToXA)( parser->qparentE[parser->sp].Te.TyStOrUn.fieldRs,
++                    &posn );
++      goto acquire_Field;
+    }
+ 
+    if (dtag == DW_TAG_member) {

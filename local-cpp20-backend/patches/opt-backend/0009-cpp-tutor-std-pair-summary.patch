@@ -1,0 +1,79 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -222,6 +222,29 @@ def top_level_template_arg(type_name):
+     return None
+ 
+ 
++def top_level_template_args(type_name, template_name):
++    start = type_name.find(template_name + '<')
++    if start < 0:
++        return None
++    start += len(template_name) + 1
++    args = []
++    arg_start = start
++    depth = 0
++    for i in range(start, len(type_name)):
++        c = type_name[i]
++        if c == '<':
++            depth += 1
++        elif c == '>':
++            if depth == 0:
++                args.append(type_name[arg_start:i].strip())
++                return args
++            depth -= 1
++        elif c == ',' and depth == 0:
++            args.append(type_name[arg_start:i].strip())
++            arg_start = i + 1
++    return None
++
++
+ def display_cpp_type(type_name):
+     normalized = (type_name or '').strip()
+     if (normalized.startswith('std::__cxx11::basic_string<char') or
+@@ -317,6 +339,35 @@ def get_std_array_summary(obj, heap):
+     ]
+ 
+ 
++def get_std_pair_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'pair<' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    first = members.get('first')
++    second = members.get('second')
++    if first is None or second is None:
++        return None
++
++    args = top_level_template_args(type_name, 'pair') or ['first', 'second']
++    if len(args) >= 2:
++        display_type = 'std::pair<' + display_cpp_type(args[0]) + ', ' + display_cpp_type(args[1]) + '>'
++    else:
++        display_type = 'std::pair'
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['first', encode_value(first, heap)],
++        ['second', encode_value(second, heap)]
++    ]
++
++
+ def get_std_vector_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -390,6 +441,10 @@ def encode_value(obj, heap):
+         if std_array_summary is not None:
+             return std_array_summary
+ 
++        std_pair_summary = get_std_pair_summary(obj, heap)
++        if std_pair_summary is not None:
++            return std_pair_summary
++
+         std_vector_summary = get_std_vector_summary(obj, heap)
+         if std_vector_summary is not None:
+             return std_vector_summary

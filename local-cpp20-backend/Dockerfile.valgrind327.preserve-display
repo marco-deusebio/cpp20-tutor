@@ -1,0 +1,8 @@
+FROM cpp-tutor/opt-cpp-backend-cpp20-sb:local AS wrapper_source
+
+FROM cpp-tutor/opt-cpp-backend-valgrind327:experimental
+
+COPY --from=wrapper_source /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py
+
+RUN chmod +x /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py \
+    && python -m py_compile /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py

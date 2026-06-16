@@ -1,0 +1,47 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -290,6 +290,33 @@ def infer_vector_element_size(deref_val):
+     return None
+ 
+ 
++def get_std_array_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'array<' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    elems = members.get('_M_elems')
++    if not elems or elems.get('kind') != 'array':
++        return None
++    encoded_elems = encode_value(elems, heap)
++
++    display_type = type_name
++    if not display_type.startswith('std::'):
++        display_type = 'std::' + display_type
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['size', ['C_DATA', obj['addr'], 'size_t', len(encoded_elems) - 2]],
++        ['elements', encoded_elems]
++    ]
++
++
+ def get_std_vector_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -384,6 +411,10 @@ def encode_value(obj, heap):
+                 encode_value(std_string_ptr['deref_val'], heap)
+             return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
+ 
++        std_array_summary = get_std_array_summary(obj, heap)
++        if std_array_summary is not None:
++            return std_array_summary
++
+         std_vector_summary = get_std_vector_summary(obj, heap)
+         if std_vector_summary is not None:
+             return std_vector_summary

@@ -1,0 +1,13 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -297,6 +297,10 @@ def encode_value(obj, heap):
+                 encode_value(std_string_ptr['deref_val'], heap)
+             return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
+ 
++        std_vector_summary = get_std_vector_summary(obj)
++        if std_vector_summary is not None:
++            return std_vector_summary
++
+         ret = ['C_STRUCT', obj['addr'], obj['type']]
+ 
+         # sort struct members by address so that they look ORDERED

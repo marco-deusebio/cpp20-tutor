@@ -1,0 +1,98 @@
+--- a/include/pub_tool_debuginfo.h
++++ b/include/pub_tool_debuginfo.h
+@@ -226,6 +226,7 @@
+       Bool     spRel;      /* True => sp-rel, False => fp-rel */
+       Bool     isVec;      /* does block have an array type, or not? */
+       HChar    name[16];   /* first 15 chars of name (asciiz) */
++      const HChar* fullname; /* complete DWARF name, owned by DebugInfo */
+    }
+    StackBlock;
+ 
+@@ -247,6 +248,7 @@
+       Bool  isVec;      /* does block have an array type, or not? */
+       HChar name[16];   /* first 15 chars of name (asciiz) */
+       HChar soname[16]; /* first 15 chars of name (asciiz) */
++      const HChar* fullname; /* complete DWARF name, owned by DebugInfo */
+    }
+    GlobalBlock;
+ 
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4713,6 +4713,7 @@
+          if (var->name)
+             VG_(strncpy)( &block.name[0], var->name, sizeof(block.name)-1 );
+          block.name[ sizeof(block.name)-1 ] = 0;
++         block.fullname = var->name;
+          VG_(addToXA)( blocks, &block );
+       }
+       else
+@@ -4732,6 +4733,7 @@
+          if (var->name)
+             VG_(strncpy)( &block.name[0], var->name, sizeof(block.name)-1 );
+          block.name[ sizeof(block.name)-1 ] = 0;
++         block.fullname = var->name;
+          VG_(addToXA)( blocks, &block );
+       }
+       else {
+@@ -4974,6 +4976,7 @@
+             gb.isVec = isVec;
+             VG_(strncpy)(&gb.name[0], var->name, sizeof(gb.name)-1);
+             VG_(strncpy)(&gb.soname[0], di->soname, sizeof(gb.soname)-1);
++            gb.fullname = var->name;
+             vg_assert(gb.name[ sizeof(gb.name)-1 ] == 0);
+             vg_assert(gb.soname[ sizeof(gb.soname)-1 ] == 0);
+ 
+--- a/memcheck/mc_translate.c
++++ b/memcheck/mc_translate.c
+@@ -8814,9 +8814,9 @@
+ 
+ 
+ /* cpp-tutor tracing.  This is the first Valgrind 3.27.x port slice:
+-   emit valid step records with line/function/stack metadata.  Variable
+-   traversal is intentionally ported in a later patch. */
++   emit valid step records with line/function/stack metadata. */
+ #define CPP_TUTOR_MAX_STEPS 5000
++#define CPP_TUTOR_MAX_ORDERED_VARNAMES 200
+ #define CPP_TUTOR_STDOUT_BUF_SIZE (10 * 1024 * 1024)
+ 
+ static Int cpp_tutor_n_steps = 0;
+@@ -8956,14 +8956,38 @@
+       const HChar* cur_fn;
+       Bool cur_hasfn = VG_(get_fnname)(ep, cur_ip, &cur_fn);
+       UInt cur_linenum;
++      XArray* blocks;
++      Word j;
+       Bool cur_haslinenum = VG_(get_linenum)(ep, cur_ip, &cur_linenum);
+ 
+       VG_(fprintf)(trace_fp,
+-                   "{\"func_name\":\"%s\", \"line\": %d, \"SP\": \"%p\", \"FP\": \"%p\", \"locals\": {}, \"ordered_varnames\": []}",
++                   "{\"func_name\":\"%s\", \"line\": %d, \"SP\": \"%p\", \"FP\": \"%p\", \"locals\": {}, \"ordered_varnames\": [",
+                    cur_hasfn ? cur_fn : "???",
+                    cur_haslinenum ? cur_linenum : -999,
+                    (void*)cur_sp,
+                    (void*)cur_fp);
++
++      blocks = VG_(di_get_stack_blocks_at_ip)(cur_ip, False);
++      if (blocks) {
++         Bool first_local = True;
++         Word n_blocks = VG_(sizeXA)(blocks);
++         if (n_blocks > CPP_TUTOR_MAX_ORDERED_VARNAMES)
++            n_blocks = CPP_TUTOR_MAX_ORDERED_VARNAMES;
++         for (j = 0; j < n_blocks; j++) {
++            StackBlock* sb = VG_(indexXA)(blocks, j);
++            const HChar* name = sb->fullname ? sb->fullname : sb->name;
++            HChar* name_json = cpp_tutor_json_encode_string(name);
++            if (first_local)
++               first_local = False;
++            else
++               VG_(fprintf)(trace_fp, ", ");
++            VG_(fprintf)(trace_fp, "%s", name_json);
++            VG_(free)(name_json);
++         }
++         VG_(deleteXA)(blocks);
++      }
++
++      VG_(fprintf)(trace_fp, "]}");
+    }
+    VG_(fprintf)(trace_fp, "]\n");
+    VG_(fprintf)(trace_fp, "}\n");

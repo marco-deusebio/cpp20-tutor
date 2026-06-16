@@ -1,0 +1,124 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4436,6 +4436,7 @@
+ #define PG_MAX_GLOBAL_VARS 256
+ #define PG_MAX_ARRAY_ELEMENTS 256
+ #define PG_MAX_STRUCT_FIELDS 128
++#define PG_MAX_C_STRING_CHARS 256
+ 
+ static void pg_emit_json_string(VgFile* trace_fp, const HChar* str)
+ {
+@@ -4519,8 +4520,92 @@
+    *n_dimensions = VG_(sizeXA)(xa);
+    *total_elements = total;
+    return True;
++}
++
++static TyEnt* pg_resolve_c_string_char_type(const XArray* tyents, UWord typeR)
++{
++   TyEnt* ent = pg_resolve_display_type(tyents, typeR);
++   if (!ent || ent->tag != Te_TyBase)
++      return NULL;
++   if (ent->Te.TyBase.enc != 'S' || ent->Te.TyBase.szB != sizeof(char))
++      return NULL;
++   return ent;
++}
++
++static void pg_emit_json_char_value(VgFile* trace_fp, HChar ch)
++{
++   switch (ch) {
++      case '\0': VG_(fprintf)(trace_fp, "\"\\\\0\""); break;
++      case '"':  VG_(fprintf)(trace_fp, "\"\\\"\""); break;
++      case '\\': VG_(fprintf)(trace_fp, "\"\\\\\""); break;
++      case '\n': VG_(fprintf)(trace_fp, "\"\\\\n\""); break;
++      case '\r': VG_(fprintf)(trace_fp, "\"\\\\r\""); break;
++      case '\t': VG_(fprintf)(trace_fp, "\"\\\\t\""); break;
++      default:   VG_(fprintf)(trace_fp, "\"%c\"", ch); break;
++   }
++}
++
++static Bool pg_c_string_len_if_safe(Addr ptr_val,
++                                    Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++                                    Word* n_chars)
++{
++   Word i;
++   Addr bad_addr;
++   UInt otag = 0;
++
++   *n_chars = 0;
++   if (ptr_val == 0)
++      return False;
++
++   for (i = 0; i < PG_MAX_C_STRING_CHARS; i++) {
++      Int res = is_mem_defined_func(ptr_val + i, sizeof(char), &bad_addr, &otag);
++      HChar ch;
++
++      if (res != 5)
++         return False;
++
++      ch = *((HChar*)(ptr_val + i));
++      if (ch == '\0') {
++         *n_chars = i + 1;
++         return True;
++      }
++   }
++
++   return False;
+ }
+ 
++static void pg_emit_c_string_deref_val(Addr ptr_val,
++                                       TyEnt* char_ent,
++                                       Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++                                       VgFile* trace_fp)
++{
++   Word i;
++   Word n_chars;
++   const HChar* type_name;
++
++   if (!pg_c_string_len_if_safe(ptr_val, is_mem_defined_func, &n_chars))
++      return;
++
++   type_name = char_ent->Te.TyBase.name ? char_ent->Te.TyBase.name : "char";
++   VG_(fprintf)(trace_fp,
++                ", \"deref_val\":{\"addr\":\"%p\", \"kind\":\"heap_block\", \"val\":[",
++                (void*)ptr_val);
++
++   for (i = 0; i < n_chars; i++) {
++      HChar ch = *((HChar*)(ptr_val + i));
++      if (i > 0)
++         VG_(fprintf)(trace_fp, ", ");
++      VG_(fprintf)(trace_fp,
++                   "{\"addr\":\"%p\", \"kind\":\"base\", \"type\":\"%s\", \"size\":1, \"val\":",
++                   (void*)(ptr_val + i),
++                   type_name);
++      pg_emit_json_char_value(trace_fp, ch);
++      VG_(fprintf)(trace_fp, "}");
++   }
++
++   VG_(fprintf)(trace_fp, "]}");
++}
++
+ static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
+                                     Addr data_addr,
+                                     Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
+@@ -4557,6 +4642,7 @@
+ 
+    if (ent->tag == Te_TyPtr || ent->tag == Te_TyRef) {
+       Addr ptr_val;
++      TyEnt* char_ent = pg_resolve_c_string_char_type(tyents, ent->Te.TyPorR.typeR);
+       VG_(fprintf)(trace_fp,
+                    "{\"addr\":\"%p\", \"kind\":\"pointer\", \"size\":%u, \"val\":",
+                    (void*)data_addr,
+@@ -4568,7 +4654,11 @@
+          VG_(fprintf)(trace_fp, "\"<UNINITIALIZED>\"}");
+       } else {
+          ptr_val = *((Addr*)data_addr);
+-         VG_(fprintf)(trace_fp, "\"%p\"}", (void*)ptr_val);
++         VG_(fprintf)(trace_fp, "\"%p\"", (void*)ptr_val);
++         if (char_ent)
++            pg_emit_c_string_deref_val(ptr_val, char_ent,
++                                       is_mem_defined_func, trace_fp);
++         VG_(fprintf)(trace_fp, "}");
+       }
+       return;
+    }

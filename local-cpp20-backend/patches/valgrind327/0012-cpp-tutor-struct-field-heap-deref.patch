@@ -1,0 +1,44 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4619,6 +4619,7 @@ static void pg_emit_struct_fields(const XArray* tyents,
+                                   TyEnt* ent,
+                                   Addr data_addr,
+                                   DiEpoch ep,
++                                  Bool allow_heap_deref,
+                                   Bool* first_field,
+                                   UInt* field_count,
+                                   Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
+@@ -4652,6 +4653,7 @@ static void pg_emit_struct_fields(const XArray* tyents,
+       if (!field->Te.Field.name) {
+          if (field_ent && field_ent->tag == Te_TyStOrUn) {
+             pg_emit_struct_fields(tyents, field_ent, field_addr, ep,
++                                  allow_heap_deref,
+                                   first_field, field_count,
+                                   is_mem_defined_func, trace_fp);
+          }
+@@ -4667,5 +4669,6 @@ static void pg_emit_struct_fields(const XArray* tyents,
+       pg_emit_json_string(trace_fp, field->Te.Field.name);
+       VG_(fprintf)(trace_fp, ":");
+       pg_emit_minimal_varinfo(tyents, field->Te.Field.typeR, field_addr,
+-                              ep, False, is_mem_defined_func, trace_fp);
++                              ep, allow_heap_deref,
++                              is_mem_defined_func, trace_fp);
+    }
+@@ -4676,5 +4679,6 @@ static void pg_emit_struct_fields(const XArray* tyents,
+       if (base && base->tag != Te_UNKNOWN && ML_(TyEnt__is_type)(base)) {
+          pg_emit_struct_fields(tyents, base, data_addr, ep,
++                               allow_heap_deref,
+                                first_field, field_count,
+                                is_mem_defined_func, trace_fp);
+       }
+@@ -4868,7 +4872,6 @@ static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
+       VG_(fprintf)(trace_fp, ", \"val\": {\n  ");
+-
+-      pg_emit_struct_fields(tyents, ent, data_addr, ep, &first_field,
+-                            &field_count, is_mem_defined_func, trace_fp);
++      pg_emit_struct_fields(tyents, ent, data_addr, ep,
++                            allow_heap_deref, &first_field,
++                            &field_count, is_mem_defined_func, trace_fp);
+-
+       VG_(fprintf)(trace_fp, "}}");
+       return;

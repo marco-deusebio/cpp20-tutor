@@ -170,6 +170,307 @@ def process_json_obj(obj, err_str, stdout_str):
     return ret
 
 
+def get_std_string_pointer(obj):
+    if obj.get('kind') != 'struct':
+        return None
+
+    type_name = obj.get('type') or ''
+    if 'basic_string<char' not in type_name:
+        return None
+
+    members = obj.get('val') or {}
+    dataplus = members.get('_M_dataplus')
+    if not dataplus or dataplus.get('kind') != 'struct':
+        return None
+
+    dataplus_members = dataplus.get('val') or {}
+    ptr = dataplus_members.get('_M_p')
+    if ptr and ptr.get('kind') == 'pointer':
+        return ptr
+
+    return None
+
+
+def parse_hex_ptr(val):
+    if not isinstance(val, basestring):
+        return None
+    if not val.startswith('0x'):
+        return None
+    try:
+        return int(val, 16)
+    except ValueError:
+        return None
+
+
+def top_level_template_arg(type_name):
+    start = type_name.find('vector<')
+    if start < 0:
+        return None
+    start += len('vector<')
+    depth = 0
+    for i in range(start, len(type_name)):
+        c = type_name[i]
+        if c == '<':
+            depth += 1
+        elif c == '>':
+            if depth == 0:
+                return type_name[start:i].strip()
+            depth -= 1
+        elif c == ',' and depth == 0:
+            return type_name[start:i].strip()
+    return None
+
+
+def top_level_template_args(type_name, template_name):
+    start = type_name.find(template_name + '<')
+    if start < 0:
+        return None
+    start += len(template_name) + 1
+    args = []
+    arg_start = start
+    depth = 0
+    for i in range(start, len(type_name)):
+        c = type_name[i]
+        if c == '<':
+            depth += 1
+        elif c == '>':
+            if depth == 0:
+                args.append(type_name[arg_start:i].strip())
+                return args
+            depth -= 1
+        elif c == ',' and depth == 0:
+            args.append(type_name[arg_start:i].strip())
+            arg_start = i + 1
+    return None
+
+
+def display_cpp_type(type_name):
+    normalized = (type_name or '').strip()
+    if (normalized.startswith('std::__cxx11::basic_string<char') or
+            normalized.startswith('std::basic_string<char') or
+            normalized.startswith('basic_string<char')):
+        return 'std::string'
+    return normalized
+
+
+def sizeof_cpp_type(type_name):
+    normalized = (type_name or '').strip()
+    if normalized in ('char', 'signed char', 'unsigned char', 'bool'):
+        return 1
+    if normalized in ('short', 'short int', 'unsigned short', 'unsigned short int'):
+        return 2
+    if normalized in ('int', 'unsigned int', 'float'):
+        return 4
+    if normalized in ('long', 'long int', 'unsigned long', 'unsigned long int',
+                      'long long', 'long long int', 'unsigned long long',
+                      'unsigned long long int', 'double'):
+        return 8
+    return None
+
+
+def sizeof_trace_value(obj):
+    addr = parse_hex_ptr(obj.get('addr'))
+    if addr is None:
+        return None
+
+    if obj.get('kind') == 'base':
+        return obj.get('size')
+
+    if obj.get('kind') == 'pointer':
+        return obj.get('size')
+
+    if obj.get('kind') == 'struct':
+        max_end = addr
+        for member in (obj.get('val') or {}).values():
+            member_addr = parse_hex_ptr(member.get('addr'))
+            member_size = sizeof_trace_value(member)
+            if member_addr is not None and member_size:
+                max_end = max(max_end, member_addr + member_size)
+        if max_end > addr:
+            return max_end - addr
+
+    if obj.get('kind') == 'array':
+        elems = obj.get('val') or []
+        if elems:
+            last = elems[-1]
+            last_addr = parse_hex_ptr(last.get('addr'))
+            last_size = sizeof_trace_value(last)
+            if last_addr is not None and last_size:
+                return last_addr + last_size - addr
+
+    return None
+
+
+def infer_vector_element_size(deref_val):
+    elems = deref_val.get('val') or []
+    if len(elems) >= 2:
+        first_addr = parse_hex_ptr(elems[0].get('addr'))
+        second_addr = parse_hex_ptr(elems[1].get('addr'))
+        if first_addr is not None and second_addr is not None and second_addr > first_addr:
+            return second_addr - first_addr
+    if elems:
+        return sizeof_trace_value(elems[0])
+    return None
+
+
+def find_struct_member(obj, member_name):
+    if obj.get('kind') != 'struct':
+        return None
+
+    members = obj.get('val') or {}
+    if member_name in members:
+        return members[member_name]
+
+    for member in members.values():
+        found = find_struct_member(member, member_name)
+        if found is not None:
+            return found
+
+    return None
+
+
+def get_std_array_summary(obj, heap):
+    if obj.get('kind') != 'struct':
+        return None
+
+    type_name = obj.get('type') or ''
+    if 'array<' not in type_name:
+        return None
+
+    members = obj.get('val') or {}
+    elems = members.get('_M_elems')
+    if not elems or elems.get('kind') != 'array':
+        return None
+    encoded_elems = encode_value(elems, heap)
+
+    display_type = type_name
+    if not display_type.startswith('std::'):
+        display_type = 'std::' + display_type
+
+    return [
+        'C_STRUCT',
+        obj['addr'],
+        display_type,
+        ['size', ['C_DATA', obj['addr'], 'size_t', len(encoded_elems) - 2]],
+        ['elements', encoded_elems]
+    ]
+
+
+def get_std_unique_ptr_summary(obj, heap):
+    if obj.get('kind') != 'struct':
+        return None
+
+    type_name = obj.get('type') or ''
+    if 'unique_ptr<' not in type_name:
+        return None
+
+    ptr = find_struct_member(obj, '_M_head_impl')
+    if not ptr or ptr.get('kind') != 'pointer':
+        return None
+
+    args = top_level_template_args(type_name, 'unique_ptr') or ['element']
+    display_type = 'std::unique_ptr<' + display_cpp_type(args[0]) + '>'
+    ret = [
+        'C_STRUCT',
+        obj['addr'],
+        display_type,
+        ['pointer', encode_value(ptr, heap)]
+    ]
+
+    deref_val = ptr.get('deref_val')
+    if deref_val and deref_val.get('kind') == 'heap_block':
+        vals = deref_val.get('val') or []
+        if vals:
+            ret.append(['pointee', encode_value(vals[0], heap)])
+
+    return ret
+
+
+def get_std_pair_summary(obj, heap):
+    if obj.get('kind') != 'struct':
+        return None
+
+    type_name = obj.get('type') or ''
+    if 'pair<' not in type_name:
+        return None
+
+    members = obj.get('val') or {}
+    first = members.get('first')
+    second = members.get('second')
+    if first is None or second is None:
+        return None
+
+    args = top_level_template_args(type_name, 'pair') or ['first', 'second']
+    if len(args) >= 2:
+        display_type = 'std::pair<' + display_cpp_type(args[0]) + ', ' + display_cpp_type(args[1]) + '>'
+    else:
+        display_type = 'std::pair'
+
+    return [
+        'C_STRUCT',
+        obj['addr'],
+        display_type,
+        ['first', encode_value(first, heap)],
+        ['second', encode_value(second, heap)]
+    ]
+
+
+def get_std_vector_summary(obj, heap):
+    if obj.get('kind') != 'struct':
+        return None
+
+    type_name = obj.get('type') or ''
+    if 'vector<' not in type_name:
+        return None
+
+    members = obj.get('val') or {}
+    impl = members.get('_M_impl')
+    if not impl or impl.get('kind') != 'struct':
+        return None
+
+    impl_members = impl.get('val') or {}
+    start = impl_members.get('_M_start')
+    finish = impl_members.get('_M_finish')
+    end = impl_members.get('_M_end_of_storage')
+    if not start or not finish or not end:
+        return None
+    if start.get('kind') != 'pointer' or finish.get('kind') != 'pointer' or end.get('kind') != 'pointer':
+        return None
+
+    elem_type = top_level_template_arg(type_name) or 'element'
+    elem_display_type = display_cpp_type(elem_type)
+    elem_size = sizeof_cpp_type(elem_type)
+    deref_val = start.get('deref_val')
+    if not elem_size and deref_val and deref_val.get('kind') == 'heap_block':
+        elem_size = infer_vector_element_size(deref_val)
+    start_addr = parse_hex_ptr(start.get('val'))
+    finish_addr = parse_hex_ptr(finish.get('val'))
+    end_addr = parse_hex_ptr(end.get('val'))
+    size = '<UNINITIALIZED>'
+    capacity = '<UNINITIALIZED>'
+    if elem_size and start_addr is not None and finish_addr is not None and finish_addr >= start_addr:
+        size = (finish_addr - start_addr) // elem_size
+    if elem_size and start_addr is not None and end_addr is not None and end_addr >= start_addr:
+        capacity = (end_addr - start_addr) // elem_size
+
+    ret = [
+        'C_STRUCT',
+        obj['addr'],
+        'std::vector<' + elem_display_type + '>',
+        ['size', ['C_DATA', finish['addr'], 'size_t', size]],
+        ['capacity', ['C_DATA', end['addr'], 'size_t', capacity]],
+        ['data', ['C_DATA', start['addr'], 'pointer', start.get('val')]]
+    ]
+
+    if isinstance(size, (int, long)) and deref_val and deref_val.get('kind') == 'heap_block':
+        elements = ['C_ARRAY', deref_val['addr']]
+        for element in (deref_val.get('val') or [])[:size]:
+            elements.append(encode_value(element, heap))
+        ret.append(['elements', elements])
+
+    return ret
+
+
 # returns an encoded value in OPT format and possibly mutates the heap
 def encode_value(obj, heap):
     if obj['kind'] == 'base':
@@ -181,6 +482,28 @@ def encode_value(obj, heap):
         return ['C_DATA', obj['addr'], 'pointer', obj['val']]
 
     elif obj['kind'] == 'struct':
+        std_string_ptr = get_std_string_pointer(obj)
+        if std_string_ptr is not None:
+            if 'deref_val' in std_string_ptr:
+                encode_value(std_string_ptr['deref_val'], heap)
+            return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
+
+        std_array_summary = get_std_array_summary(obj, heap)
+        if std_array_summary is not None:
+            return std_array_summary
+
+        std_unique_ptr_summary = get_std_unique_ptr_summary(obj, heap)
+        if std_unique_ptr_summary is not None:
+            return std_unique_ptr_summary
+
+        std_pair_summary = get_std_pair_summary(obj, heap)
+        if std_pair_summary is not None:
+            return std_pair_summary
+
+        std_vector_summary = get_std_vector_summary(obj, heap)
+        if std_vector_summary is not None:
+            return std_vector_summary
+
         ret = ['C_STRUCT', obj['addr'], obj['type']]
 
         # sort struct members by address so that they look ORDERED
@@ -211,7 +534,6 @@ def encode_value(obj, heap):
         return encode_value(obj['val'], heap)
 
     elif obj['kind'] == 'heap_block':
-        assert obj['addr'] not in heap
         new_elt = ['C_ARRAY', obj['addr']]
         for e in obj['val']:
             new_elt.append(encode_value(e, heap)) # TODO: is an infinite loop possible here?
@@ -445,9 +767,6 @@ void *x = foo(); // <-- there is an extraneous step here AFTER foo returns but
             e['to_delete'] = True
 
 
-    for e in final_execution_points:
-        if 'to_delete' in e:
-            print >> sys.stderr, 'to_delete:', json.dumps(e)
     final_execution_points = [e for e in final_execution_points if 'to_delete' not in e]
 
 

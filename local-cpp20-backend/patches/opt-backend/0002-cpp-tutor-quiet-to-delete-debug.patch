@@ -1,0 +1,12 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -471,9 +471,6 @@
+             e['to_delete'] = True
+ 
+ 
+-    for e in final_execution_points:
+-        if 'to_delete' in e:
+-            print >> sys.stderr, 'to_delete:', json.dumps(e)
+     final_execution_points = [e for e in final_execution_points if 'to_delete' not in e]
+ 
+ 

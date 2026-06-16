@@ -1,0 +1,150 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -47,6 +47,7 @@
+ #include "pub_core_machine.h"    // VG_PLAT_USES_PPCTOC
+ #include "pub_core_xarray.h"
+ #include "pub_core_oset.h"
+ #include "pub_core_execontext.h"
++#include "pub_core_addrinfo.h"
+ #include "pub_core_stacktrace.h" // VG_(get_StackTrace) XXX: circular dependency
+ #include "pub_core_ume.h"
+@@ -4437,6 +4438,7 @@
+ #define PG_MAX_ARRAY_ELEMENTS 256
+ #define PG_MAX_STRUCT_FIELDS 128
+ #define PG_MAX_C_STRING_CHARS 256
++#define PG_MAX_HEAP_ELEMENTS 256
+ 
+ static void pg_emit_json_string(VgFile* trace_fp, const HChar* str)
+ {
+@@ -4607,7 +4609,81 @@
+ }
+ 
+ static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
+-                                    Addr data_addr,
++                                    Addr data_addr, DiEpoch ep,
++                                    Bool allow_heap_deref,
++                                    Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++                                    VgFile* trace_fp);
++
++static void pg_emit_heap_deref_val(const XArray* tyents, UWord typeR,
++                                   Addr ptr_val, DiEpoch ep,
++                                   Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
++                                   VgFile* trace_fp)
++{
++   AddrInfo ai;
++   MaybeULong element_size;
++   Addr block_base_addr;
++   ULong n_elements;
++   ULong i;
++   Addr cur_addr;
++   Addr bad_addr;
++   UInt otag = 0;
++   Int res;
++
++   if (ptr_val == 0)
++      return;
++
++   ai.tag = Addr_Undescribed;
++   VG_(describe_addr)(ep, ptr_val, &ai);
++   if (ai.tag != Addr_Block) {
++      VG_(clear_addrinfo)(&ai);
++      return;
++   }
++
++   element_size = ML_(sizeOfType)(tyents, typeR);
++   if (!element_size.b || element_size.ul == 0 || ai.Addr.Block.block_szB == 0) {
++      VG_(clear_addrinfo)(&ai);
++      return;
++   }
++
++   block_base_addr = ptr_val - ai.Addr.Block.rwoffset;
++   n_elements = ai.Addr.Block.block_szB / element_size.ul;
++   if (n_elements == 0) {
++      VG_(clear_addrinfo)(&ai);
++      return;
++   }
++   if (n_elements > PG_MAX_HEAP_ELEMENTS)
++      n_elements = PG_MAX_HEAP_ELEMENTS;
++   for (i = 0; i < n_elements; i++) {
++      cur_addr = block_base_addr + (i * element_size.ul);
++      res = is_mem_defined_func(cur_addr, element_size.ul, &bad_addr, &otag);
++      if (res == 6)
++         break;
++   }
++   n_elements = i;
++   if (n_elements == 0) {
++      VG_(clear_addrinfo)(&ai);
++      return;
++   }
++
++   VG_(fprintf)(trace_fp,
++                ", \"deref_val\":{\"addr\":\"%p\", \"kind\":\"heap_block\", \"val\":[\n  ",
++                (void*)block_base_addr);
++   cur_addr = block_base_addr;
++   for (i = 0; i < n_elements; i++) {
++      if (i > 0)
++         VG_(fprintf)(trace_fp, ",\n  ");
++      pg_emit_minimal_varinfo(tyents, typeR, cur_addr, ep, False,
++                              is_mem_defined_func, trace_fp);
++      cur_addr += element_size.ul;
++   }
++   VG_(fprintf)(trace_fp, "]}");
++
++   VG_(clear_addrinfo)(&ai);
++}
++
++static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
++                                    Addr data_addr, DiEpoch ep,
++                                    Bool allow_heap_deref,
+                                     Int (*is_mem_defined_func)(Addr, SizeT, Addr*, UInt*),
+                                     VgFile* trace_fp)
+ {
+@@ -4658,6 +4732,9 @@
+          if (char_ent)
+             pg_emit_c_string_deref_val(ptr_val, char_ent,
+                                        is_mem_defined_func, trace_fp);
++         else if (allow_heap_deref)
++            pg_emit_heap_deref_val(tyents, ent->Te.TyPorR.typeR, ptr_val, ep,
++                                   is_mem_defined_func, trace_fp);
+          VG_(fprintf)(trace_fp, "}");
+       }
+       return;
+@@ -4695,7 +4772,8 @@
+          if (i > 0)
+             VG_(fprintf)(trace_fp, ",\n  ");
+          pg_emit_minimal_varinfo(tyents, ent->Te.TyArray.typeR,
+-                                 cur_elt_addr, is_mem_defined_func, trace_fp);
++                                 cur_elt_addr, ep, False,
++                                 is_mem_defined_func, trace_fp);
+          cur_elt_addr += element_size.ul;
+       }
+ 
+@@ -4747,7 +4825,7 @@
+          pg_emit_json_string(trace_fp, field->Te.Field.name);
+          VG_(fprintf)(trace_fp, ":");
+          pg_emit_minimal_varinfo(tyents, field->Te.Field.typeR, field_addr,
+-                                 is_mem_defined_func, trace_fp);
++                                 ep, False, is_mem_defined_func, trace_fp);
+       }
+ 
+       VG_(fprintf)(trace_fp, "}}");
+@@ -4916,7 +4994,8 @@
+       pg_emit_json_string(trace_fp, locals[i].name);
+       VG_(fprintf)(trace_fp, ": ");
+       pg_emit_minimal_varinfo(locals[i].tyents, locals[i].typeR,
+-                              locals[i].addr, is_mem_defined_func, trace_fp);
++                              locals[i].addr, ep, True,
++                              is_mem_defined_func, trace_fp);
+    }
+    VG_(fprintf)(trace_fp, "},\n\"ordered_varnames\": [");
+    for (i = 0; i < n_locals; i++) {
+@@ -5019,7 +5098,8 @@
+       pg_emit_json_string(trace_fp, globals[i].name);
+       VG_(fprintf)(trace_fp, ": ");
+       pg_emit_minimal_varinfo(globals[i].tyents, globals[i].typeR,
+-                              globals[i].addr, is_mem_defined_func, trace_fp);
++                              globals[i].addr, ep, True,
++                              is_mem_defined_func, trace_fp);
+    }
+    VG_(fprintf)(trace_fp, "},\n\"ordered_globals\": [");
+    for (i = 0; i < n_globals; i++) {
