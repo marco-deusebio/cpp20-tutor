@@ -1,0 +1,44 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -294,6 +294,8 @@ def display_cpp_type(type_name):
+             normalized.startswith('std::basic_string<char') or
+             normalized.startswith('basic_string<char')):
+         return 'std::string'
++    if normalized in ('monostate', 'std::monostate'):
++        return 'std::monostate'
+     return normalized
+ 
+ 
+@@ -700,6 +702,21 @@ def get_std_reference_wrapper_summary(obj, heap):
+     ]
+ 
+ 
++def get_std_monostate_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = display_cpp_type(obj.get('type') or '')
++    if type_name != 'std::monostate':
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        'std::monostate'
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1316,6 +1332,10 @@ def encode_value(obj, heap):
+         if std_reference_wrapper_summary is not None:
+             return std_reference_wrapper_summary
+ 
++        std_monostate_summary = get_std_monostate_summary(obj, heap)
++        if std_monostate_summary is not None:
++            return std_monostate_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary

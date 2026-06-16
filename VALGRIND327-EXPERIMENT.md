@@ -27,14 +27,14 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:124d7b4c5ca325e083ecc2a9175f7a29ea0f6c4015864ed04513ae211f857eee`
+`sha256:4263d755764aa88e59f80ddb18c4984374ccdb6a322da6b8f1f84bbf133de2b6`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
 `std::atomic<T>` summaries, `std::initializer_list<T>` summaries, and
-`std::reference_wrapper<T>` summaries.
+`std::reference_wrapper<T>` summaries, and `std::monostate` summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -108,6 +108,8 @@ field for libstdc++ atomics backed by scalar `_M_i` storage.
 `data` and `size` fields instead of raw `_M_array` / `_M_len` internals.
 `std::reference_wrapper<T>` now renders with source-level type names and a
 clean `target` pointer instead of raw `_M_data` internals.
+`std::monostate` now renders with the source-level `std::monostate` spelling
+both as a standalone value and as an active `std::variant` alternative.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -344,6 +346,9 @@ Postprocessor patches live in
 - `0026-cpp-tutor-std-reference-wrapper-summary.patch`: recognizes libstdc++
   `std::reference_wrapper<T>` objects, hides raw `_M_data` internals, and
   renders a clean source-level summary with a `target` pointer.
+- `0027-cpp-tutor-std-monostate-summary.patch`: normalizes `monostate` type
+  spellings to `std::monostate` and renders standalone or variant-contained
+  monostate values as empty source-level structs.
 
 ## Porting Checklist
 
@@ -575,6 +580,17 @@ Postprocessor patches live in
      clean postprocess stderr, parseable JSON, and Valgrind reporting zero
      errors. `ref` and `pref` render with source-level type names and `target`
      pointers while the wrapped `value` and `p` locals show their mutations.
+   - Done: post-`0027` standalone `std::monostate` and
+     `std::variant<std::monostate, int>` probe compiles/runs with stdout
+     `1 42`, clean postprocess stderr, parseable JSON, and Valgrind reporting
+     zero errors. The standalone `empty_tag` and the variant's active empty
+     alternative both render as `std::monostate`.
+   - Blocked for now: `std::source_location` is not available in the current
+     GCC 10 experimental image (`fatal error: source_location: No such file or
+     directory`).
+   - Needs Valgrind-side follow-up: `std::filesystem::path` compiles/runs, but
+     the raw trace can contain unescaped stack character-array control bytes in
+     libstdc++ path/string internals before postprocessing can summarize it.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
