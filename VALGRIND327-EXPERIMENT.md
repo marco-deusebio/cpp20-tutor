@@ -27,12 +27,12 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:4156b8bac8ecaf4dc0732552ffbe243406c305d60c434109dbfcbbb7eccaee85`
+`sha256:7632ee5516d2068901ea272913eee9f687edd1ce23b080160246ca7595f37263`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
-source-level `std::weak_ptr<T>`, `std::span<T>`, and `std::string_view`
-summaries.
+source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
+`std::chrono` duration/time-point summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -95,7 +95,10 @@ spans still show `data` and `size`, while their viewed stack elements remain
 visible through the backing array local. `std::string_view` now renders with
 source-level type names, `data`, `size`, and non-null-terminated sliced
 `characters` when the view pointer has an emitted character dereference
-payload. Nested heap pointers, non-SSO variant string payloads, broader variant
+payload. `std::chrono::duration` values now render with source-level duration
+names and `count`, and `std::chrono::time_point` values render with a
+source-level clock/duration type plus a nested `time_since_epoch` duration.
+Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
 details, and some static-local/global edge cases still need additional
@@ -312,6 +315,11 @@ Postprocessor patches live in
   `std::basic_string_view<char>` objects, hides `_M_len` / `_M_str` internals,
   and renders `data`, `size`, plus sliced `characters` without requiring a
   null terminator.
+- `0022-cpp-tutor-std-chrono-summary.patch`: recognizes libstdc++
+  `std::chrono::duration` and `std::chrono::time_point` objects, normalizes
+  common duration aliases such as `milliseconds` and `seconds`, and renders
+  `count` or nested `time_since_epoch` summaries instead of raw `__r` / `__d`
+  fields.
 
 ## Porting Checklist
 
@@ -517,6 +525,14 @@ Postprocessor patches live in
      with `size = 11` and characters `hello World`; `word` renders as a
      five-character substring view whose characters update from `world` to
      `World` after the backing string mutation.
+   - Done: post-`0022` `std::chrono::milliseconds`,
+     `std::chrono::seconds`, and `std::chrono::time_point` probe compiles/runs
+     with stdout `1750 1 1775`, clean postprocess stderr, parseable JSON, and
+     Valgrind reporting zero errors. `ms` renders as
+     `std::chrono::milliseconds` with `count = 1750`, `sec` renders as
+     `std::chrono::seconds` with `count = 1`, and `tp` renders as
+     `std::chrono::time_point<std::chrono::steady_clock,
+     std::chrono::milliseconds>` with nested `time_since_epoch.count = 1775`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

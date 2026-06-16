@@ -1,0 +1,116 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -703,6 +703,98 @@ def get_std_string_view_summary(obj, heap):
+ 
+     return ret
+ 
++
++def display_chrono_clock(type_name):
++    normalized = (type_name or '').strip()
++    if normalized.startswith('std::chrono::_V2::'):
++        return 'std::chrono::' + normalized[len('std::chrono::_V2::'):]
++    return normalized
++
++
++def display_chrono_duration_type(type_name):
++    args = top_level_template_args(type_name, 'duration') or []
++    if not args:
++        return 'std::chrono::duration'
++
++    rep = display_cpp_type(args[0])
++    period = args[1].strip() if len(args) > 1 else 'std::ratio<1, 1>'
++    aliases = {
++        'std::ratio<1, 1000000000>': 'nanoseconds',
++        'std::ratio<1, 1000000>': 'microseconds',
++        'std::ratio<1, 1000>': 'milliseconds',
++        'std::ratio<1, 1>': 'seconds',
++        'std::ratio<60, 1>': 'minutes',
++        'std::ratio<3600, 1>': 'hours'
++    }
++    alias = aliases.get(period)
++    if alias and rep in ('long int', 'long long', 'long long int'):
++        return 'std::chrono::' + alias
++    if len(args) > 1:
++        return 'std::chrono::duration<' + rep + ', ' + period + '>'
++    return 'std::chrono::duration<' + rep + '>'
++
++
++def display_chrono_time_point_type(type_name):
++    args = top_level_template_args(type_name, 'time_point') or []
++    if not args:
++        return 'std::chrono::time_point'
++
++    clock = display_chrono_clock(args[0])
++    if len(args) > 1:
++        duration_type = display_chrono_duration_type(args[1])
++        return 'std::chrono::time_point<' + clock + ', ' + duration_type + '>'
++    return 'std::chrono::time_point<' + clock + '>'
++
++
++def is_chrono_duration_type(type_name):
++    normalized = type_name or ''
++    return 'duration<' in normalized and 'time_point<' not in normalized
++
++
++def is_chrono_time_point_type(type_name):
++    return 'time_point<' in (type_name or '')
++
++
++def get_std_chrono_duration_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if not is_chrono_duration_type(type_name):
++        return None
++
++    count = get_direct_struct_member(obj, '__r')
++    if count is None:
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_chrono_duration_type(type_name),
++        ['count', encode_value(count, heap)]
++    ]
++
++
++def get_std_chrono_time_point_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if not is_chrono_time_point_type(type_name):
++        return None
++
++    duration = get_direct_struct_member(obj, '__d')
++    if duration is None:
++        return None
++
++    duration_summary = get_std_chrono_duration_summary(duration, heap)
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_chrono_time_point_type(type_name),
++        ['time_since_epoch', duration_summary or encode_value(duration, heap)]
++    ]
++
+ 
+ def get_std_optional_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+@@ -1054,6 +1148,14 @@ def encode_value(obj, heap):
+         if std_string_view_summary is not None:
+             return std_string_view_summary
+ 
++        std_chrono_time_point_summary = get_std_chrono_time_point_summary(obj, heap)
++        if std_chrono_time_point_summary is not None:
++            return std_chrono_time_point_summary
++
++        std_chrono_duration_summary = get_std_chrono_duration_summary(obj, heap)
++        if std_chrono_duration_summary is not None:
++            return std_chrono_duration_summary
++
+         std_optional_summary = get_std_optional_summary(obj, heap)
+         if std_optional_summary is not None:
+             return std_optional_summary
