@@ -27,12 +27,13 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:54bfa97997b10c86c4d6bcd2a1c34828ef84fe585891329f1304befd0f8e226d`
+`sha256:425040ff92bfd8f786875fe4d407e05125f19c2852bb319022a5e18164fc1bda`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
-`std::chrono` duration/time-point summaries, and `std::bitset<N>` summaries.
+`std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
+`std::atomic<T>` summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -100,6 +101,8 @@ names and `count`, and `std::chrono::time_point` values render with a
 source-level clock/duration type plus a nested `time_since_epoch` duration.
 `std::bitset<N>` now renders with source-level type names, fixed `size`, raw
 storage `value`, and per-bit entries for bitsets up to 256 bits.
+`std::atomic<T>` now renders with source-level type names and a clean `value`
+field for libstdc++ atomics backed by scalar `_M_i` storage.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -326,6 +329,9 @@ Postprocessor patches live in
   `std::bitset<N>` objects, hides raw `_M_w` storage behind a source-level
   summary, and renders `size`, storage `value`, and per-bit boolean entries
   for bitsets up to 256 bits.
+- `0024-cpp-tutor-std-atomic-summary.patch`: recognizes libstdc++
+  `std::atomic<T>` objects backed by scalar `_M_i` storage and renders a clean
+  source-level summary with a single `value` field.
 
 ## Porting Checklist
 
@@ -544,6 +550,10 @@ Postprocessor patches live in
      zero errors. `bits` renders as `std::bitset<8>` with `size = 8`,
      `value = 136`, and bit entries showing bits 3 and 7 set after the final
      mutation.
+   - Done: post-`0024` `std::atomic<int>` probe compiles/runs with stdout
+     `7 1`, clean postprocess stderr, parseable JSON, and Valgrind reporting
+     zero errors. `counter` renders as `std::atomic<int>` with `value`
+     progressing from `<UNINITIALIZED>` to `3` and then `7`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

@@ -1,0 +1,46 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -875,6 +875,32 @@ def get_std_bitset_summary(obj, heap):
+     return ret
+ 
+ 
++def get_std_atomic_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'atomic<' not in type_name:
++        return None
++
++    value = get_direct_struct_member(obj, '_M_i')
++    if value is None:
++        return None
++
++    args = top_level_template_args(type_name, 'atomic') or []
++    if args:
++        display_type = 'std::atomic<' + display_cpp_type(args[0]) + '>'
++    else:
++        display_type = 'std::atomic'
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['value', encode_value(value, heap)]
++    ]
++
++
+ def get_std_optional_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -1231,6 +1257,10 @@ def encode_value(obj, heap):
+         if std_bitset_summary is not None:
+             return std_bitset_summary
+ 
++        std_atomic_summary = get_std_atomic_summary(obj, heap)
++        if std_atomic_summary is not None:
++            return std_atomic_summary
++
+         std_optional_summary = get_std_optional_summary(obj, heap)
+         if std_optional_summary is not None:
+             return std_optional_summary
