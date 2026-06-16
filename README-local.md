@@ -34,6 +34,10 @@ Run it with:
 
 ./start-all-valgrind327-experimental.sh
 
+Or, after installing the local command shim:
+
+cpp20-tutor
+
 This image is intentionally separate from the stable local backend. It keeps
 the current wrapper layer but points `run_cpp_backend.py` at Valgrind 3.27.1.
 The current experimental patch stack restores cpp-tutor trace emission and
