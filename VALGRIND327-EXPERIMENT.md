@@ -27,13 +27,13 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:425040ff92bfd8f786875fe4d407e05125f19c2852bb319022a5e18164fc1bda`
+`sha256:b3cf5b3445fef1897713c9367b137e0673510d0e6c35ace31c58157a46a83f64`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
-`std::atomic<T>` summaries.
+`std::atomic<T>` summaries, and `std::initializer_list<T>` summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -103,6 +103,8 @@ source-level clock/duration type plus a nested `time_since_epoch` duration.
 storage `value`, and per-bit entries for bitsets up to 256 bits.
 `std::atomic<T>` now renders with source-level type names and a clean `value`
 field for libstdc++ atomics backed by scalar `_M_i` storage.
+`std::initializer_list<T>` now renders with source-level type names plus
+`data` and `size` fields instead of raw `_M_array` / `_M_len` internals.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -332,6 +334,10 @@ Postprocessor patches live in
 - `0024-cpp-tutor-std-atomic-summary.patch`: recognizes libstdc++
   `std::atomic<T>` objects backed by scalar `_M_i` storage and renders a clean
   source-level summary with a single `value` field.
+- `0025-cpp-tutor-std-initializer-list-summary.patch`: recognizes libstdc++
+  `std::initializer_list<T>` objects, hides raw `_M_array` / `_M_len` internals,
+  and renders source-level `data` and `size` fields, plus `elements` when the
+  pointer has a bounded dereference payload.
 
 ## Porting Checklist
 
@@ -554,6 +560,10 @@ Postprocessor patches live in
      `7 1`, clean postprocess stderr, parseable JSON, and Valgrind reporting
      zero errors. `counter` renders as `std::atomic<int>` with `value`
      progressing from `<UNINITIALIZED>` to `3` and then `7`.
+   - Done: post-`0025` `std::initializer_list<int>` probe compiles/runs with
+     stdout `3 6`, clean postprocess stderr, parseable JSON, and Valgrind
+     reporting zero errors. `nums` renders as `std::initializer_list<int>`
+     with `data` and `size = 3` in both the caller and callee frames.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

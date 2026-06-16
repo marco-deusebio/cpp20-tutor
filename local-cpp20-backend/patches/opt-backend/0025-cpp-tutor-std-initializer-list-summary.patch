@@ -1,0 +1,53 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -640,6 +640,39 @@ def get_std_span_summary(obj, heap):
+     return ret
+ 
+ 
++def get_initializer_list_display_type(type_name):
++    args = top_level_template_args(type_name, 'initializer_list') or ['element']
++    return 'std::initializer_list<' + display_cpp_type(args[0]) + '>'
++
++
++def get_std_initializer_list_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'initializer_list<' not in type_name:
++        return None
++
++    ptr = get_direct_struct_member(obj, '_M_array')
++    length = get_direct_struct_member(obj, '_M_len')
++    if not ptr or ptr.get('kind') != 'pointer' or length is None:
++        return None
++
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        get_initializer_list_display_type(type_name),
++        ['data', encode_value(ptr, heap)],
++        ['size', encode_value(length, heap)]
++    ]
++
++    elements = get_span_elements(ptr, length.get('val'), heap)
++    if elements is not None:
++        ret.append(['elements', elements])
++
++    return ret
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1247,6 +1282,10 @@ def encode_value(obj, heap):
+         if std_span_summary is not None:
+             return std_span_summary
+ 
++        std_initializer_list_summary = get_std_initializer_list_summary(obj, heap)
++        if std_initializer_list_summary is not None:
++            return std_initializer_list_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary
