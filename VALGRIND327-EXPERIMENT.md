@@ -27,8 +27,8 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:d083c9393614f483cc5b0fe524d8bdad4427bd9d3bad185a639fbc5ae1758829`
-from the `2026-06-16` rebuild that added clean `std::tuple<T...>`
+`sha256:83e9771fffaf5866b51970088e5466f1955dd8a23cb105ebc5bf6b843c2b06b1`
+from the `2026-06-16` rebuild that added clean `std::shared_ptr<T>`
 postprocessing.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
@@ -69,11 +69,14 @@ when Valgrind emitted a bounded heap dereference for the owned object, a
 `std::string` pointees. The postprocessor now also preserves duplicate raw
 JSON member keys emitted by libstdc++ tuple leaves, so `std::tuple<T...>` can
 render with clean source-level element indexes, a `size` field, and scalar,
-`std::string`, or simple struct/class element values. Nested heap pointers,
-shared/weak pointer internals, general C++ container internals,
-non-null-terminated character buffers, unions, bitfields, fuller
-inherited/base-class layout details, and some static-local/global edge cases
-still need additional forward-port work.
+`std::string`, or simple struct/class element values. `std::shared_ptr<T>` now
+renders a source-level smart pointer summary with `pointer`, `use_count`, and,
+when the stored pointer's heap payload is available, `pointee` fields for
+scalar and simple struct/class pointees. Nested heap pointers, `weak_ptr`,
+`optional` and `variant` payload storage, general C++ container internals,
+non-null-terminated character buffers, unions, bitfields, fuller inherited/
+base-class layout details, and some static-local/global edge cases still need
+additional forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -242,6 +245,10 @@ Postprocessor patches live in
   as repeated `_M_head_impl` tuple leaves, then recognizes libstdc++
   `std::tuple<T...>` objects and renders a clean summary with `size` and
   source-order numeric element fields.
+- `0012-cpp-tutor-std-shared-ptr-summary.patch`: recognizes libstdc++
+  `std::shared_ptr<T>` objects, extracts `_M_ptr`, finds `_M_use_count` through
+  the shared control block heap payload, and renders a clean summary with
+  `pointer`, optional `use_count`, and optional `pointee` fields.
 
 ## Porting Checklist
 
@@ -382,6 +389,22 @@ Postprocessor patches live in
    - Done: post-`0011` `std::unique_ptr<int>`, `std::unique_ptr<Point>`, and
      `std::unique_ptr<std::string>` regression still renders smart-pointer
      summaries with pointee-bearing steps and stdout `10 15 cats`.
+   - Done: post-`0012` `std::shared_ptr<int>` and `std::shared_ptr<Point>`
+     probe compiles/runs with stdout `10 15 2` and clean
+     Valgrind/postprocess stderr. `a` and `copy` render as
+     `std::shared_ptr<int>` with `use_count = 2` and pointee progressing from
+     `7` to `10`; `p` renders as `std::shared_ptr<Point>` with
+     `use_count = 1` and structured pointee `Point{x = 2, y = 15}`.
+   - Done: post-`0012` smoke, tuple/pair regression, and `unique_ptr`
+     regression still pass with clean Valgrind/postprocess stderr.
+   - Known gap: `std::optional<T>` and `std::variant<T...>` currently expose
+     engagement/index metadata, but their contained payload storage still
+     appears as `<UNSUPPORTED>` in the Valgrind-side trace and needs a deeper
+     serializer patch before useful value summaries can be added.
+   - Known gap: `std::shared_ptr<std::string>` can surface a raw control
+     character in the emitted string heap payload during construction, which
+     can make the `.vgtrace` JSON parser reject that record. Scalar and simple
+     struct/class shared-pointer pointees are verified.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

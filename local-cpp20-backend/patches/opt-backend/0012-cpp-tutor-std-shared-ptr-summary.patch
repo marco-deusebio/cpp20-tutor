@@ -1,0 +1,105 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -327,6 +327,16 @@ def infer_vector_element_size(deref_val):
+ 
+ 
+ def find_struct_member(obj, member_name):
++    if not obj:
++        return None
++
++    if obj.get('kind') == 'heap_block' or obj.get('kind') == 'array':
++        for val in obj.get('val') or []:
++            found = find_struct_member(val, member_name)
++            if found is not None:
++                return found
++        return None
++
+     if obj.get('kind') != 'struct':
+         return None
+ 
+@@ -356,6 +356,28 @@ def get_struct_members_by_base_name(obj, member_name):
+     return found
+ 
+ 
++def find_value_at_addr(obj, addr):
++    if not addr:
++        return None
++
++    if obj.get('addr') == addr:
++        return obj
++
++    if obj.get('kind') == 'heap_block' or obj.get('kind') == 'array':
++        for val in obj.get('val') or []:
++            found = find_value_at_addr(val, addr)
++            if found is not None:
++                return found
++
++    if obj.get('kind') == 'struct':
++        for val in (obj.get('val') or {}).values():
++            found = find_value_at_addr(val, addr)
++            if found is not None:
++                return found
++
++    return None
++
++
+ def get_std_array_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -413,6 +435,45 @@ def get_std_unique_ptr_summary(obj, heap):
+     return ret
+ 
+ 
++def get_std_shared_ptr_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'shared_ptr<' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    ptr = members.get('_M_ptr')
++    refcount = members.get('_M_refcount')
++    if not ptr or ptr.get('kind') != 'pointer':
++        return None
++
++    args = top_level_template_args(type_name, 'shared_ptr') or ['element']
++    display_type = 'std::shared_ptr<' + display_cpp_type(args[0]) + '>'
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['pointer', encode_value(ptr, heap)]
++    ]
++
++    if refcount is not None:
++        pi = find_struct_member(refcount, '_M_pi')
++        if pi and pi.get('kind') == 'pointer':
++            deref_val = pi.get('deref_val')
++            use_count = find_struct_member(deref_val, '_M_use_count') if deref_val else None
++            if use_count is not None:
++                ret.append(['use_count', encode_value(use_count, heap)])
++
++    deref_val = ptr.get('deref_val')
++    pointee = find_value_at_addr(deref_val, ptr.get('val')) if deref_val else None
++    if pointee is not None:
++        ret.append(['pointee', encode_value(pointee, heap)])
++
++    return ret
++
++
+ def get_std_tuple_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -556,6 +617,10 @@ def encode_value(obj, heap):
+         if std_unique_ptr_summary is not None:
+             return std_unique_ptr_summary
+ 
++        std_shared_ptr_summary = get_std_shared_ptr_summary(obj, heap)
++        if std_shared_ptr_summary is not None:
++            return std_shared_ptr_summary
++
+         std_tuple_summary = get_std_tuple_summary(obj, heap)
+         if std_tuple_summary is not None:
+             return std_tuple_summary
