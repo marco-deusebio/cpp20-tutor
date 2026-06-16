@@ -1,0 +1,97 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -563,6 +563,83 @@ def get_std_weak_ptr_summary(obj, heap):
+ 
+     return ret
+ 
++
++DYNAMIC_SPAN_EXTENT = '18446744073709551615'
++
++
++def get_span_display_type(type_name):
++    args = top_level_template_args(type_name, 'span') or ['element']
++    element_type = display_cpp_type(args[0])
++    if len(args) > 1 and args[1].strip() != DYNAMIC_SPAN_EXTENT:
++        return 'std::span<' + element_type + ', ' + args[1].strip() + '>'
++    return 'std::span<' + element_type + '>'
++
++
++def get_span_elements(ptr, size, heap):
++    if not isinstance(size, (int, long)) or size < 0:
++        return None
++    if size > 256:
++        return None
++
++    deref_val = ptr.get('deref_val')
++    if not deref_val or deref_val.get('kind') != 'heap_block':
++        return None
++
++    start_addr = parse_hex_ptr(ptr.get('val'))
++    if start_addr is None:
++        return None
++
++    elem_size = infer_vector_element_size(deref_val)
++    if not elem_size:
++        return None
++
++    max_addr = start_addr + size * elem_size
++    elements = ['C_ARRAY', ptr.get('val')]
++    for element in deref_val.get('val') or []:
++        element_addr = parse_hex_ptr(element.get('addr'))
++        if element_addr is None:
++            continue
++        if element_addr < start_addr:
++            continue
++        if element_addr >= max_addr:
++            break
++        elements.append(encode_value(element, heap))
++        if len(elements) - 2 >= size:
++            break
++
++    if len(elements) - 2 != size:
++        return None
++
++    return elements
++
++
++def get_std_span_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'span<' not in type_name:
++        return None
++
++    ptr = get_direct_struct_member(obj, '_M_ptr')
++    extent = find_struct_member(obj, '_M_extent_value')
++    if not ptr or ptr.get('kind') != 'pointer':
++        return None
++
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        get_span_display_type(type_name),
++        ['data', encode_value(ptr, heap)]
++    ]
++    if extent is not None:
++        ret.append(['size', encode_value(extent, heap)])
++        elements = get_span_elements(ptr, extent.get('val'), heap)
++        if elements is not None:
++            ret.append(['elements', elements])
++
++    return ret
++
+ 
+ def get_std_optional_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+@@ -848,6 +920,10 @@ def encode_value(obj, heap):
+         if std_weak_ptr_summary is not None:
+             return std_weak_ptr_summary
+ 
++        std_span_summary = get_std_span_summary(obj, heap)
++        if std_span_summary is not None:
++            return std_span_summary
++
+         std_optional_summary = get_std_optional_summary(obj, heap)
+         if std_optional_summary is not None:
+             return std_optional_summary

@@ -27,11 +27,11 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:8058727cb1aa6ed09d9cabed81e350de193e07595f69b4e488ddf588b4efd221`
+`sha256:2837e2207e753068b716d833016a8e3ae3e83b16d653f5250fed67c46391aec2`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
-source-level `std::weak_ptr<T>` summaries.
+source-level `std::weak_ptr<T>` and `std::span<T>` summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -87,11 +87,15 @@ stored in libstdc++ aligned in-place storage now decode to the same
 pointer-style `std::string` summary shape backed by a heap character array for
 small-string values. `std::weak_ptr<T>` now renders with source-level type
 names, stored pointer, live `use_count`, and a best-effort `pointee` when
-Valgrind emitted a bounded dereference payload for `_M_ptr`. Nested heap
-pointers, non-SSO variant string payloads, broader variant alternative shapes,
-general C++ container internals, non-null-terminated character buffers,
-bitfields, fuller inherited/base-class layout details, and some
-static-local/global edge cases still need additional forward-port work.
+Valgrind emitted a bounded dereference payload for `_M_ptr`. `std::span<T>` now
+renders with source-level type names, `data`, `size`, and active `elements`
+when the span data pointer has an emitted heap dereference payload. Stack-backed
+spans still show `data` and `size`, while their viewed stack elements remain
+visible through the backing array local. Nested heap pointers, non-SSO variant
+string payloads, broader variant alternative shapes, general C++ container
+internals, non-null-terminated character buffers, bitfields, fuller
+inherited/base-class layout details, and some static-local/global edge cases
+still need additional forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -296,6 +300,10 @@ Postprocessor patches live in
   `std::weak_ptr<T>` objects, extracts `_M_ptr`, finds `_M_use_count` through
   the weak reference-count control block, and renders a clean summary with
   `pointer`, optional `use_count`, and optional `pointee` fields.
+- `0020-cpp-tutor-std-span-summary.patch`: recognizes libstdc++ `std::span<T>`
+  objects, hides `_M_extent` / `_M_ptr` internals, normalizes dynamic extent to
+  `std::span<T>`, and renders `data`, `size`, plus sliced `elements` when the
+  span points at a bounded heap dereference payload.
 
 ## Porting Checklist
 
@@ -484,6 +492,17 @@ Postprocessor patches live in
      progressing from `7` to `10`; `wp` renders as `std::weak_ptr<Point>` with
      `pointer`, `use_count = 1`, and structured pointee
      `Point{x = 2, y = 15}` after mutation.
+   - Done: post-`0020` stack-backed `std::span<int>` and `std::span<Point>`
+     probe compiles/runs with stdout `20 3 14`, clean postprocess stderr,
+     parseable JSON, and Valgrind reporting zero errors. `all`, `mid`, and
+     `points` render as source-level `std::span<T>` summaries with `data` and
+     `size`, while the backing stack arrays show the element mutations.
+   - Done: post-`0020` vector-backed `std::span<int>` probe with reserved
+     capacity compiles/runs with stdout `30 2 5`, clean postprocess stderr,
+     parseable JSON, and Valgrind reporting zero errors. `view` renders active
+     heap-backed elements `1,2,30,4`; `tail` renders the sliced elements
+     `30,4`; after `push_back(5)`, `nums` grows to five elements while `view`
+     remains a four-element span.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
