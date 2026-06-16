@@ -27,10 +27,11 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:dc3f492e1fd9ed7a361652716b80f1ff9e8b516d1cc44fc4d6b3f223d07ac708`
+`sha256:8058727cb1aa6ed09d9cabed81e350de193e07595f69b4e488ddf588b4efd221`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
-small-string active alternatives inside `std::variant<int, std::string>`.
+small-string active alternatives inside `std::variant<int, std::string>`, plus
+source-level `std::weak_ptr<T>` summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -84,11 +85,13 @@ template name, active `index`, active type, and only the selected alternative
 instead of every overlapping union branch. Active `std::string` alternatives
 stored in libstdc++ aligned in-place storage now decode to the same
 pointer-style `std::string` summary shape backed by a heap character array for
-small-string values. Nested heap pointers, `weak_ptr`, non-SSO variant string
-payloads, broader variant alternative shapes, general C++ container internals,
-non-null-terminated character buffers, bitfields, fuller inherited/base-class
-layout details, and some static-local/global edge cases still need additional
-forward-port work.
+small-string values. `std::weak_ptr<T>` now renders with source-level type
+names, stored pointer, live `use_count`, and a best-effort `pointee` when
+Valgrind emitted a bounded dereference payload for `_M_ptr`. Nested heap
+pointers, non-SSO variant string payloads, broader variant alternative shapes,
+general C++ container internals, non-null-terminated character buffers,
+bitfields, fuller inherited/base-class layout details, and some
+static-local/global edge cases still need additional forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -289,6 +292,10 @@ Postprocessor patches live in
 - `0018-cpp-tutor-relax-variant-string-storage.patch`: relaxes the helper's
   type-name guard so the decoder relies on the already-selected active
   `std::string` alternative plus the observed storage layout.
+- `0019-cpp-tutor-std-weak-ptr-summary.patch`: recognizes libstdc++
+  `std::weak_ptr<T>` objects, extracts `_M_ptr`, finds `_M_use_count` through
+  the weak reference-count control block, and renders a clean summary with
+  `pointer`, optional `use_count`, and optional `pointee` fields.
 
 ## Porting Checklist
 
@@ -470,6 +477,13 @@ Postprocessor patches live in
      in `v` now renders as a pointer-style `std::string` value backed by a heap
      character array containing `d,o,g,s,\0` instead of raw aligned in-place
      storage bytes.
+   - Done: post-`0019` `std::weak_ptr<int>` and `std::weak_ptr<Point>` probe
+     compiles/runs with stdout `10 15 2`, clean postprocess stderr, parseable
+     JSON, and Valgrind reporting zero errors. `wi` renders as
+     `std::weak_ptr<int>` with `pointer`, live `use_count`, and pointee
+     progressing from `7` to `10`; `wp` renders as `std::weak_ptr<Point>` with
+     `pointer`, `use_count = 1`, and structured pointee
+     `Point{x = 2, y = 15}` after mutation.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

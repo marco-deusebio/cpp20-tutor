@@ -1,0 +1,65 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -518,6 +518,51 @@ def get_std_shared_ptr_summary(obj, heap):
+ 
+     return ret
+ 
++
++def get_std_weak_ptr_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'weak_ptr<' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    ptr = members.get('_M_ptr')
++    refcount = members.get('_M_refcount')
++    if not ptr or ptr.get('kind') != 'pointer':
++        return None
++
++    args = top_level_template_args(type_name, 'weak_ptr') or ['element']
++    display_element_type = display_cpp_type(args[0])
++    display_type = 'std::weak_ptr<' + display_element_type + '>'
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['pointer', encode_value(ptr, heap)]
++    ]
++
++    if refcount is not None:
++        pi = find_struct_member(refcount, '_M_pi')
++        if pi and pi.get('kind') == 'pointer':
++            deref_val = pi.get('deref_val')
++            use_count = find_struct_member(deref_val, '_M_use_count') if deref_val else None
++            if use_count is not None:
++                ret.append(['use_count', encode_value(use_count, heap)])
++
++    deref_val = ptr.get('deref_val')
++    pointee = find_value_at_addr(deref_val, ptr.get('val')) if deref_val else None
++    if display_element_type == 'std::string':
++        string_pointee = find_first_std_string_object(deref_val)
++        if string_pointee is not None:
++            pointee = string_pointee
++    if pointee is not None:
++        std_string_summary = encode_std_string_value(pointee, heap)
++        ret.append(['pointee', std_string_summary or encode_value(pointee, heap)])
++
++    return ret
++
+ 
+ def get_std_optional_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+@@ -808,6 +848,10 @@ def encode_value(obj, heap):
+         if std_shared_ptr_summary is not None:
+             return std_shared_ptr_summary
+ 
++        std_weak_ptr_summary = get_std_weak_ptr_summary(obj, heap)
++        if std_weak_ptr_summary is not None:
++            return std_weak_ptr_summary
++
+         std_optional_summary = get_std_optional_summary(obj, heap)
+         if std_optional_summary is not None:
+             return std_optional_summary
