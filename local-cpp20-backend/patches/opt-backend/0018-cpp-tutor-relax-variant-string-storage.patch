@@ -1,0 +1,13 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -625,10 +625,6 @@ def encode_inline_std_string_storage(obj, heap):
+     if not obj or obj.get('kind') != 'struct':
+         return None
+ 
+-    type_name = obj.get('type') or ''
+-    if '__aligned_membuf' not in type_name or 'basic_string<char' not in type_name:
+-        return None
+-
+     storage = get_direct_struct_member(obj, '_M_storage')
+     bytes_ = trace_byte_array_values(storage)
+     if bytes_ is None or len(bytes_) < 17:

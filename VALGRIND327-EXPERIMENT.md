@@ -27,9 +27,10 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:662c4c5dbf7356a63ed3d13c79db2033d8e552d884c2b3fb55a98184da3e0be1`
+`sha256:dc3f492e1fd9ed7a361652716b80f1ff9e8b516d1cc44fc4d6b3f223d07ac708`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
-summaries and conservative `std::variant<T...>` active-alternative summaries.
+summaries, conservative `std::variant<T...>` active-alternative summaries, and
+small-string active alternatives inside `std::variant<int, std::string>`.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -80,11 +81,14 @@ Postprocessor summaries now render `std::optional<T>` with `engaged` and
 `value` fields for scalar, simple struct/class, and pointer-style
 `std::string` payloads. `std::variant<T...>` now renders its source-level
 template name, active `index`, active type, and only the selected alternative
-instead of every overlapping union branch. Nested heap pointers, `weak_ptr`,
-fuller `std::variant<std::string>` value decoding from aligned in-place
-storage, general C++ container internals, non-null-terminated character
-buffers, bitfields, fuller inherited/base-class layout details, and some
-static-local/global edge cases still need additional forward-port work.
+instead of every overlapping union branch. Active `std::string` alternatives
+stored in libstdc++ aligned in-place storage now decode to the same
+pointer-style `std::string` summary shape backed by a heap character array for
+small-string values. Nested heap pointers, `weak_ptr`, non-SSO variant string
+payloads, broader variant alternative shapes, general C++ container internals,
+non-null-terminated character buffers, bitfields, fuller inherited/base-class
+layout details, and some static-local/global edge cases still need additional
+forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -277,6 +281,14 @@ Postprocessor patches live in
   `std::variant<T...>` wrappers, uses `_M_index` to choose the active
   `_M_first` alternative through the nested `_M_rest` union chain, and returns
   a conservative summary with `index`, `active_type`, and the selected value.
+- `0016-cpp-tutor-std-variant-string-summary.patch`: adds byte-array helpers
+  for libstdc++ in-place string storage inside variant alternatives, including
+  tolerant handling for uninitialized spare small-string capacity.
+- `0017-cpp-tutor-use-variant-string-summary.patch`: invokes the in-place
+  string decoder when the selected variant alternative is `std::string`.
+- `0018-cpp-tutor-relax-variant-string-storage.patch`: relaxes the helper's
+  type-name guard so the decoder relies on the already-selected active
+  `std::string` alternative plus the observed storage layout.
 
 ## Porting Checklist
 
@@ -452,9 +464,12 @@ Postprocessor patches live in
      `active_type`, and only the selected alternative; the `int` alternative
      renders cleanly as `3`, while the active `std::string` alternative still
      exposes raw aligned in-place storage bytes for `dogs`.
-   - Known gap: `std::variant<std::string>` still needs a dedicated decoder for
-     libstdc++ aligned in-place string storage if we want its active value to
-     collapse all the way to the existing pointer-style `std::string` summary.
+   - Done: post-`0016`/`0017`/`0018` optional/variant probe still compiles/runs
+     with stdout `10 15 cats dogs`, clean postprocess stderr, parseable JSON,
+     and Valgrind reporting zero errors. The active `std::string` alternative
+     in `v` now renders as a pointer-style `std::string` value backed by a heap
+     character array containing `d,o,g,s,\0` instead of raw aligned in-place
+     storage bytes.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

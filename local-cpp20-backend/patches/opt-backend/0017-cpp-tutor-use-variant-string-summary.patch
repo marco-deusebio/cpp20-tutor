@@ -1,0 +1,14 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -698,7 +698,12 @@ def get_std_variant_summary(obj, heap):
+     alt_node = get_std_variant_alternative_node(union_obj, index_val)
+     alt_value = get_std_variant_alternative_value(alt_node)
+     if alt_value is not None:
++        if active_type == 'std::string':
++            inline_string_summary = encode_inline_std_string_storage(alt_value, heap)
++            if inline_string_summary is not None:
++                ret.append(['value', inline_string_summary])
++                return ret
+         ret.append(['value', encode_value(alt_value, heap)])
+ 
+     return ret

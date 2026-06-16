@@ -1,0 +1,79 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -583,6 +583,78 @@ def get_std_variant_alternative_value(alt_node):
+     if storage is not None:
+         return storage
+ 
+     return alt_node
++
++
++def trace_byte_array_values(obj):
++    if not obj or obj.get('kind') != 'array':
++        return None
++
++    vals = []
++    for val in obj.get('val') or []:
++        byte = val.get('val')
++        if byte == '<UNINITIALIZED>':
++            vals.append(None)
++            continue
++        if not isinstance(byte, (int, long)):
++            return None
++        if byte < 0 or byte > 255:
++            return None
++        vals.append(byte)
++    return vals
++
++
++def read_little_endian_uint(bytes_):
++    ret = 0
++    for idx, byte in enumerate(bytes_):
++        if byte is None:
++            return None
++        ret |= byte << (idx * 8)
++    return ret
++
++
++def format_hex_addr(addr):
++    return '0x%X' % addr
++
++
++def escape_trace_char(byte):
++    if byte == 0:
++        return '\\0'
++    if 32 <= byte < 127:
++        return chr(byte)
++    return '\\u%04x' % byte
++
++
++def encode_inline_std_string_storage(obj, heap):
++    if not obj or obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if '__aligned_membuf' not in type_name or 'basic_string<char' not in type_name:
++        return None
++
++    storage = get_direct_struct_member(obj, '_M_storage')
++    bytes_ = trace_byte_array_values(storage)
++    if bytes_ is None or len(bytes_) < 17:
++        return None
++
++    ptr = read_little_endian_uint(bytes_[:8])
++    size = read_little_endian_uint(bytes_[8:16])
++    if ptr is None or size is None:
++        return None
++    if size > len(bytes_) - 16:
++        return None
++    if any(byte is None for byte in bytes_[16:16 + size]):
++        return None
++
++    ptr_addr = format_hex_addr(ptr)
++    chars = ['C_ARRAY', ptr_addr]
++    for offset, byte in enumerate(bytes_[16:16 + size]):
++        chars.append(['C_DATA', format_hex_addr(ptr + offset), 'char', escape_trace_char(byte)])
++    if len(bytes_) > 16 + size and bytes_[16 + size] is not None:
++        chars.append(['C_DATA', format_hex_addr(ptr + size), 'char',
++                      escape_trace_char(bytes_[16 + size])])
++    heap[ptr_addr] = chars
++    return ['C_DATA', obj.get('addr'), 'std::string', ptr_addr]
