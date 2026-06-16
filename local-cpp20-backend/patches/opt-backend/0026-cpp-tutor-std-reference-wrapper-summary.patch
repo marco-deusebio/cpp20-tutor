@@ -1,0 +1,45 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -675,6 +675,31 @@ def get_std_initializer_list_summary(obj, heap):
+     return ret
+ 
+ 
++def get_reference_wrapper_display_type(type_name):
++    args = top_level_template_args(type_name, 'reference_wrapper') or ['element']
++    return 'std::reference_wrapper<' + display_cpp_type(args[0]) + '>'
++
++
++def get_std_reference_wrapper_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'reference_wrapper<' not in type_name:
++        return None
++
++    ptr = get_direct_struct_member(obj, '_M_data')
++    if not ptr or ptr.get('kind') != 'pointer':
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        get_reference_wrapper_display_type(type_name),
++        ['target', encode_value(ptr, heap)]
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1284,6 +1312,10 @@ def encode_value(obj, heap):
+         if std_initializer_list_summary is not None:
+             return std_initializer_list_summary
+ 
++        std_reference_wrapper_summary = get_std_reference_wrapper_summary(obj, heap)
++        if std_reference_wrapper_summary is not None:
++            return std_reference_wrapper_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary
