@@ -27,12 +27,12 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:7632ee5516d2068901ea272913eee9f687edd1ce23b080160246ca7595f37263`
+`sha256:54bfa97997b10c86c4d6bcd2a1c34828ef84fe585891329f1304befd0f8e226d`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
-`std::chrono` duration/time-point summaries.
+`std::chrono` duration/time-point summaries, and `std::bitset<N>` summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -98,6 +98,8 @@ source-level type names, `data`, `size`, and non-null-terminated sliced
 payload. `std::chrono::duration` values now render with source-level duration
 names and `count`, and `std::chrono::time_point` values render with a
 source-level clock/duration type plus a nested `time_since_epoch` duration.
+`std::bitset<N>` now renders with source-level type names, fixed `size`, raw
+storage `value`, and per-bit entries for bitsets up to 256 bits.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -320,6 +322,10 @@ Postprocessor patches live in
   common duration aliases such as `milliseconds` and `seconds`, and renders
   `count` or nested `time_since_epoch` summaries instead of raw `__r` / `__d`
   fields.
+- `0023-cpp-tutor-std-bitset-summary.patch`: recognizes libstdc++
+  `std::bitset<N>` objects, hides raw `_M_w` storage behind a source-level
+  summary, and renders `size`, storage `value`, and per-bit boolean entries
+  for bitsets up to 256 bits.
 
 ## Porting Checklist
 
@@ -533,6 +539,11 @@ Postprocessor patches live in
      `std::chrono::seconds` with `count = 1`, and `tp` renders as
      `std::chrono::time_point<std::chrono::steady_clock,
      std::chrono::milliseconds>` with nested `time_since_epoch.count = 1775`.
+   - Done: post-`0023` `std::bitset<8>` probe compiles/runs with stdout
+     `136 2`, clean postprocess stderr, parseable JSON, and Valgrind reporting
+     zero errors. `bits` renders as `std::bitset<8>` with `size = 8`,
+     `value = 136`, and bit entries showing bits 3 and 7 set after the final
+     mutation.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

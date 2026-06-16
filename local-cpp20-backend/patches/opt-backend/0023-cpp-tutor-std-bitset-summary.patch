@@ -1,0 +1,100 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -795,6 +795,86 @@ def get_std_chrono_time_point_summary(obj, heap):
+     ]
+ 
+ 
++def get_bitset_size(type_name):
++    args = top_level_template_args(type_name, 'bitset') or []
++    if not args:
++        return None
++    try:
++        return int(args[0])
++    except ValueError:
++        return None
++
++
++def get_bitset_words(word_obj):
++    if word_obj is None:
++        return None
++
++    if word_obj.get('kind') == 'base':
++        val = word_obj.get('val')
++        if not isinstance(val, (int, long)):
++            return None
++        return [val]
++
++    if word_obj.get('kind') == 'array':
++        words = []
++        for word in word_obj.get('val') or []:
++            if word.get('kind') != 'base':
++                return None
++            val = word.get('val')
++            if not isinstance(val, (int, long)):
++                return None
++            words.append(val)
++        return words
++
++    return None
++
++
++def build_bitset_bits(obj, bit_count, words):
++    if bit_count is None or bit_count < 0 or bit_count > 256:
++        return None
++    if words is None:
++        return None
++
++    base_addr = parse_hex_ptr(obj.get('addr'))
++    bits = ['C_ARRAY', obj.get('addr')]
++    for idx in range(bit_count):
++        word_idx = idx // 64
++        bit_idx = idx % 64
++        if word_idx >= len(words):
++            return None
++        bit = 1 if (words[word_idx] & (1 << bit_idx)) else 0
++        bit_addr = format_hex_addr(base_addr + idx) if base_addr is not None else obj.get('addr')
++        bits.append(['C_DATA', bit_addr, 'bool', bit])
++    return bits
++
++
++def get_std_bitset_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'bitset<' not in type_name:
++        return None
++
++    bit_count = get_bitset_size(type_name)
++    word_obj = get_direct_struct_member(obj, '_M_w')
++    words = get_bitset_words(word_obj)
++    if bit_count is None or words is None:
++        return None
++
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        'std::bitset<' + str(bit_count) + '>',
++        ['size', ['C_DATA', obj['addr'], 'size_t', bit_count]],
++        ['value', encode_value(word_obj, heap)]
++    ]
++    bits = build_bitset_bits(obj, bit_count, words)
++    if bits is not None:
++        ret.append(['bits', bits])
++    return ret
++
++
+ def get_std_optional_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -1154,6 +1227,10 @@ def encode_value(obj, heap):
+         if std_chrono_duration_summary is not None:
+             return std_chrono_duration_summary
+ 
++        std_bitset_summary = get_std_bitset_summary(obj, heap)
++        if std_bitset_summary is not None:
++            return std_bitset_summary
++
+         std_optional_summary = get_std_optional_summary(obj, heap)
+         if std_optional_summary is not None:
+             return std_optional_summary
