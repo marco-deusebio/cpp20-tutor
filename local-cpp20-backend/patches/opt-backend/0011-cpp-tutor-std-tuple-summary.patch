@@ -1,0 +1,103 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -48,6 +48,19 @@ ONLY_ONE_REC_PER_LINE = True
+ 
+ all_execution_points = []
+ 
++
++def preserve_duplicate_json_keys(pairs):
++    ret = {}
++    seen = {}
++    for key, val in pairs:
++        count = seen.get(key, 0) + 1
++        seen[key] = count
++        if count > 1:
++            key = key + '__dup' + str(count)
++        ret[key] = val
++    return ret
++
++
+ # False if record isn't parsed properly or is an exception
+ def process_record(lines):
+     if not lines:
+@@ -74,7 +87,7 @@ def process_record(lines):
+         # cases, replace with "val": null so as not to crash the json
+         # parser
+         rec = rec.replace('"val":******', '"val":null')
+-        obj = json.loads(rec)
++        obj = json.loads(rec, object_pairs_hook=preserve_duplicate_json_keys)
+     except ValueError:
+         print >> sys.stderr, "Ugh, bad record!", rec
+         return False
+@@ -329,6 +342,20 @@ def find_struct_member(obj, member_name):
+     return None
+ 
+ 
++def get_struct_members_by_base_name(obj, member_name):
++    if obj.get('kind') != 'struct':
++        return []
++
++    members = obj.get('val') or {}
++    found = []
++    for key, member in members.items():
++        if key == member_name or key.startswith(member_name + '__dup'):
++            found.append(member)
++
++    found.sort(key=lambda member: parse_hex_ptr(member.get('addr')) or 0)
++    return found
++
++
+ def get_std_array_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -386,6 +413,39 @@ def get_std_unique_ptr_summary(obj, heap):
+     return ret
+ 
+ 
++def get_std_tuple_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'tuple<' not in type_name:
++        return None
++
++    elements = get_struct_members_by_base_name(obj, '_M_head_impl')
++    if not elements:
++        return None
++
++    args = top_level_template_args(type_name, 'tuple') or []
++    display_args = [display_cpp_type(arg) for arg in args]
++    if display_args:
++        display_type = 'std::tuple<' + ', '.join(display_args) + '>'
++    else:
++        display_type = 'std::tuple'
++
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['size', ['C_DATA', obj['addr'], 'size_t', len(elements)]]
++    ]
++
++    # libstdc++ stores tuple leaves in reverse source-element order.
++    for idx, element in enumerate(reversed(elements)):
++        ret.append([str(idx), encode_value(element, heap)])
++
++    return ret
++
++
+ def get_std_pair_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -496,6 +556,10 @@ def encode_value(obj, heap):
+         if std_unique_ptr_summary is not None:
+             return std_unique_ptr_summary
+ 
++        std_tuple_summary = get_std_tuple_summary(obj, heap)
++        if std_tuple_summary is not None:
++            return std_tuple_summary
++
+         std_pair_summary = get_std_pair_summary(obj, heap)
+         if std_pair_summary is not None:
+             return std_pair_summary

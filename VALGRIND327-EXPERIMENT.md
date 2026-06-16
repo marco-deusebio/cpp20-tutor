@@ -27,8 +27,8 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:f0985bf6d6fd0c92f20878aadc84fc3e21db9fefb88689df0a7418c5a18712d8`
-from the `2026-06-15` rebuild that added clean `std::unique_ptr<T>`
+`sha256:d083c9393614f483cc5b0fe524d8bdad4427bd9d3bad185a639fbc5ae1758829`
+from the `2026-06-16` rebuild that added clean `std::tuple<T...>`
 postprocessing.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
@@ -66,10 +66,12 @@ template names and its existing `first`/`second` values. `std::unique_ptr<T>`
 now renders as a source-level smart pointer summary with a `pointer` field and,
 when Valgrind emitted a bounded heap dereference for the owned object, a
 `pointee` field for scalar, simple struct/class, and currently pointer-style
-`std::string` pointees. Nested heap pointers, shared/weak pointer internals,
-general C++ container internals, tuple
-storage internals, non-null-terminated character buffers, unions, bitfields,
-fuller
+`std::string` pointees. The postprocessor now also preserves duplicate raw
+JSON member keys emitted by libstdc++ tuple leaves, so `std::tuple<T...>` can
+render with clean source-level element indexes, a `size` field, and scalar,
+`std::string`, or simple struct/class element values. Nested heap pointers,
+shared/weak pointer internals, general C++ container internals,
+non-null-terminated character buffers, unions, bitfields, fuller
 inherited/base-class layout details, and some static-local/global edge cases
 still need additional forward-port work.
 Top-level globals in the active user debug object now render into
@@ -236,6 +238,10 @@ Postprocessor patches live in
   `std::unique_ptr<T>` control blocks, extracts the nested stored pointer from
   `_M_head_impl`, and returns a clean smart-pointer summary with `pointer` and
   optional `pointee` fields.
+- `0011-cpp-tutor-std-tuple-summary.patch`: preserves duplicate JSON keys such
+  as repeated `_M_head_impl` tuple leaves, then recognizes libstdc++
+  `std::tuple<T...>` objects and renders a clean summary with `size` and
+  source-order numeric element fields.
 
 ## Porting Checklist
 
@@ -350,9 +356,6 @@ Postprocessor patches live in
      stdout `10 cat dogs` and clean Valgrind/postprocess stderr. `item` renders
      as `std::pair<int, std::string>` with `first` progressing to `10` and
      `second` rendered as `std::string`.
-   - Known gap: the same probe shows `std::tuple<int, double, std::string>` is
-     not ready for clean postprocessing yet; the current trace exposes only one
-     `_M_head_impl` value rather than all tuple elements.
    - Done: post-`0009` `std::array<int, 3>` / `std::array<Point, 2>` regression
      still renders clean `std::array` summaries with active elements and stdout
      `32`.
@@ -364,9 +367,21 @@ Postprocessor patches live in
      the owned string object represented through the existing pointer-style
      `std::string` value.
    - Done: post-`0010` `std::pair<int, std::string>` regression still renders
-     clean `std::pair<int, std::string>` summaries, keeps the known
-     `std::tuple<...>` raw-layout gap unchanged, and produces stdout
+     clean `std::pair<int, std::string>` summaries and produces stdout
      `10 cat dogs` with clean Valgrind/postprocess stderr.
+   - Done: post-`0011` `std::tuple<int, double, std::string>` and
+     `std::tuple<int, Point>` probe compiles/runs with stdout `10 dogs 12`
+     and clean Valgrind/postprocess stderr. `a` renders as
+     `std::tuple<int, double, std::string>` with `size = 3` and elements
+     `0 = 10`, `1 = 2.5`, and `2 = std::string`; `b` renders as
+     `std::tuple<int, Point>` with `size = 2`, `0 = 7`, and structured
+     `Point{x = 2, y = 12}`.
+   - Done: post-`0011` `std::pair<int, std::string>` / tuple regression
+     renders clean summaries for both `std::pair<int, std::string>` and
+     `std::tuple<int, double, std::string>` with stdout `10 cat dogs`.
+   - Done: post-`0011` `std::unique_ptr<int>`, `std::unique_ptr<Point>`, and
+     `std::unique_ptr<std::string>` regression still renders smart-pointer
+     summaries with pointee-bearing steps and stdout `10 15 cats`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
