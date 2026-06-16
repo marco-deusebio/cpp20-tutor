@@ -1,0 +1,67 @@
+--- a/coregrind/m_debuginfo/debuginfo.c	2026-06-16 03:10:03
++++ b/coregrind/m_debuginfo/debuginfo.c	2026-06-16 03:10:15
+@@ -4633,7 +4633,7 @@
+    XArray* fieldRs;
+ 
+    if (!ent || ent->tag != Te_TyStOrUn || !ent->Te.TyStOrUn.complete ||
+-       !ent->Te.TyStOrUn.isStruct || !ent->Te.TyStOrUn.fieldRs) {
++       !ent->Te.TyStOrUn.fieldRs) {
+       return;
+    }
+ 
+@@ -4647,12 +4647,19 @@
+       if (*field_count >= PG_MAX_STRUCT_FIELDS)
+          return;
+ 
+-      if (!field || field->tag != Te_Field || !field->Te.Field.isStruct ||
+-          field->Te.Field.nLoc != -1) {
++      if (!field || field->tag != Te_Field) {
+          continue;
+       }
+ 
+-      field_addr = data_addr + field->Te.Field.pos.offset;
++      if (ent->Te.TyStOrUn.isStruct) {
++         if (!field->Te.Field.isStruct || field->Te.Field.nLoc != -1)
++            continue;
++         field_addr = data_addr + field->Te.Field.pos.offset;
++      } else {
++         if (field->Te.Field.isStruct || field->Te.Field.nLoc != 0)
++            continue;
++         field_addr = data_addr;
++      }
+       field_ent = pg_resolve_display_type(tyents, field->Te.Field.typeR);
+ 
+       if (!field->Te.Field.name) {
+@@ -4677,7 +4684,8 @@
+                               is_mem_defined_func, trace_fp);
+    }
+ 
+-   if (*field_count < PG_MAX_STRUCT_FIELDS && ent->Te.TyStOrUn.typeR != 0) {
++   if (ent->Te.TyStOrUn.isStruct &&
++       *field_count < PG_MAX_STRUCT_FIELDS && ent->Te.TyStOrUn.typeR != 0) {
+       TyEnt* base = ML_(TyEnts__index_by_cuOff)(tyents, NULL,
+                                                 ent->Te.TyStOrUn.typeR);
+       if (base && base->tag != Te_UNKNOWN && ML_(TyEnt__is_type)(base)) {
+@@ -4871,2 +4871,1 @@
+-      if (!ent->Te.TyStOrUn.complete || !ent->Te.TyStOrUn.isStruct ||
+-          !ent->Te.TyStOrUn.fieldRs) {
++      if (!ent->Te.TyStOrUn.complete || !ent->Te.TyStOrUn.fieldRs) {
+
+--- a/coregrind/m_debuginfo/readdwarf3.c	2026-06-16 03:10:03
++++ b/coregrind/m_debuginfo/readdwarf3.c	2026-06-16 03:10:15
+@@ -4472,6 +4472,15 @@
+                        &posn );
+          /* And record the child itself */
+          goto acquire_Field;
++      } else if (!parent_is_struct) {
++         /* Union members normally have no DW_AT_data_member_location.  Keep
++            them as zero-offset fields so higher-level serializers can expose
++            active-storage payloads used by libstdc++ optional/variant. */
++         fieldE.Te.Field.isStruct = parent_is_struct;
++         vg_assert(parser->qparentE[parser->sp].Te.TyStOrUn.fieldRs);
++         VG_(addToXA)( parser->qparentE[parser->sp].Te.TyStOrUn.fieldRs,
++                       &posn );
++         goto acquire_Field;
+       } else {
+          /* Member with no location - this can happen with static
+             const members in C++ code which are compile time constants

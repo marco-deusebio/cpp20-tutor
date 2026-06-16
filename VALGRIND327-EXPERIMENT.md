@@ -27,9 +27,9 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:58715f481349a5d346fd305c8c5e9d5824bf057f89487759c2a793ab20acbfca`
-from the `2026-06-16` rebuild that renders `std::shared_ptr<std::string>`
-pointees as clean `std::string` values.
+`sha256:8a99ffbcdc8513f233594b5ea4606600b4033fe379ab34aaad0d154c4db93e96`
+from the `2026-06-16` rebuild that exposes union-backed libstdc++
+`std::optional` and `std::variant` payload storage to the trace.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -73,10 +73,14 @@ render with clean source-level element indexes, a `size` field, and scalar,
 renders a source-level smart pointer summary with `pointer`, `use_count`, and,
 when the stored pointer's heap payload is available, `pointee` fields for
 scalar, simple struct/class, and currently pointer-style `std::string`
-pointees. Nested heap pointers, `weak_ptr`, `optional` and `variant` payload
-storage, general C++ container internals, non-null-terminated character
-buffers, unions, bitfields, fuller inherited/base-class layout details, and
-some static-local/global edge cases still need additional forward-port work.
+pointees. The Valgrind-side union field support now exposes raw libstdc++
+`std::optional` payload storage (`_M_value`) and `std::variant` alternative
+storage (`_M_u`, `_M_first`, `_M_rest`, `_M_index`) to the postprocessor.
+Nested heap pointers, `weak_ptr`, clean source-level `std::optional<T>` /
+`std::variant<T...>` summaries, general C++ container internals,
+non-null-terminated character buffers, bitfields, fuller inherited/base-class
+layout details, and some static-local/global edge cases still need additional
+forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -202,6 +206,11 @@ Current tracked patches:
   This lets top-level objects with pointer fields, including libstdc++
   `std::vector<T>` control blocks, expose bounded heap payloads for their data
   pointers without recursively dereferencing nested pointers.
+- `0013-cpp-tutor-union-fields.patch`: teaches the Valgrind 3.27.1 DWARF reader
+  to keep union members with no explicit `DW_AT_data_member_location` as
+  zero-offset fields, then lets the direct serializer emit complete unions.
+  This exposes libstdc++ union-backed storage used by `std::optional<T>` and
+  `std::variant<T...>` to the postprocessor.
 
 Postprocessor patches live in
 `local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
@@ -285,6 +294,9 @@ Postprocessor patches live in
    - Done: DWARF inheritance entries are preserved as anonymous fields, which
      exposes inherited libstdc++ control blocks such as `std::vector`'s
      `_M_impl`.
+   - Done: DWARF union members with no explicit location are preserved as
+     zero-offset fields, which exposes raw libstdc++ `std::optional<T>` and
+     `std::variant<T...>` payload storage.
    - Done: libstdc++ `std::vector<T>` postprocessing into a cleaner summary
      with `size`, `capacity`, and `data` fields when the control-block pointers
      are available.
@@ -294,7 +306,7 @@ Postprocessor patches live in
    - Done: vector element-size inference from trace payloads enables
      `std::vector<Point>` summaries to show active structured element values.
    - Next: richer local/global variable serialization for nested heap pointers,
-     smart pointer/container internals, unions, bitfields,
+     smart pointer/container summaries, bitfields,
      inherited/base-class details, and function-scope static variable edge
      cases.
 3. Rebuild `cpp-tutor/opt-cpp-backend-valgrind327:experimental`.
@@ -412,10 +424,16 @@ Postprocessor patches live in
      with `pointer`, `use_count = 1`, and `pointee = std::string` instead of
      the previous unsupported struct placeholder; scalar and simple
      struct/class shared-pointer regressions still pass in the same probe.
-   - Known gap: `std::optional<T>` and `std::variant<T...>` currently expose
-     engagement/index metadata, but their contained payload storage still
-     appears as `<UNSUPPORTED>` in the Valgrind-side trace and needs a deeper
-     serializer patch before useful value summaries can be added.
+   - Done: post-Valgrind-`0013` `std::optional<int>`,
+     `std::optional<Point>`, `std::optional<std::string>`, and
+     `std::variant<int, std::string>` probe compiles/runs with stdout
+     `10 15 cats dogs`, clean postprocess stderr, and Valgrind reporting zero
+     errors. The raw trace now exposes optional `_M_value` payloads and variant
+     `_M_u` alternatives instead of empty union shells.
+   - Known gap: `std::optional<T>` and `std::variant<T...>` still need clean
+     source-level postprocessor summaries. `std::variant<T...>` in particular
+     still shows noisy overlapping union alternatives even though `_M_index`
+     identifies the active alternative.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
