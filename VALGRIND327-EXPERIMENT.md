@@ -27,9 +27,9 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:2857407b751b4d15084e4dac29073c79d5d8deac47792e872a28e92b1127d132`
-from the `2026-06-16` rebuild that JSON-escapes control characters in
-Valgrind-emitted character heap payloads.
+`sha256:58715f481349a5d346fd305c8c5e9d5824bf057f89487759c2a793ab20acbfca`
+from the `2026-06-16` rebuild that renders `std::shared_ptr<std::string>`
+pointees as clean `std::string` values.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -72,11 +72,11 @@ render with clean source-level element indexes, a `size` field, and scalar,
 `std::string`, or simple struct/class element values. `std::shared_ptr<T>` now
 renders a source-level smart pointer summary with `pointer`, `use_count`, and,
 when the stored pointer's heap payload is available, `pointee` fields for
-scalar and simple struct/class pointees. Nested heap pointers, `weak_ptr`,
-`optional` and `variant` payload storage, general C++ container internals,
-non-null-terminated character buffers, unions, bitfields, fuller inherited/
-base-class layout details, and some static-local/global edge cases still need
-additional forward-port work.
+scalar, simple struct/class, and currently pointer-style `std::string`
+pointees. Nested heap pointers, `weak_ptr`, `optional` and `variant` payload
+storage, general C++ container internals, non-null-terminated character
+buffers, unions, bitfields, fuller inherited/base-class layout details, and
+some static-local/global edge cases still need additional forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -252,6 +252,10 @@ Postprocessor patches live in
   `std::shared_ptr<T>` objects, extracts `_M_ptr`, finds `_M_use_count` through
   the shared control block heap payload, and renders a clean summary with
   `pointer`, optional `use_count`, and optional `pointee` fields.
+- `0013-cpp-tutor-shared-ptr-string-pointee.patch`: reuses the existing
+  `std::string` postprocessor summary when a `std::shared_ptr<std::string>`
+  points inside a combined `make_shared` heap allocation, replacing the raw
+  unsupported anonymous field with a clean pointer-style string pointee.
 
 ## Porting Checklist
 
@@ -404,14 +408,14 @@ Postprocessor patches live in
      compiles/runs with stdout `10 15 cats 2`, clean Valgrind/postprocess
      stderr, parseable trace JSON, and escaped character heap bytes such as
      `\u0002` instead of raw control characters.
+   - Done: post-`0013` `std::shared_ptr<std::string>` probe now renders `s`
+     with `pointer`, `use_count = 1`, and `pointee = std::string` instead of
+     the previous unsupported struct placeholder; scalar and simple
+     struct/class shared-pointer regressions still pass in the same probe.
    - Known gap: `std::optional<T>` and `std::variant<T...>` currently expose
      engagement/index metadata, but their contained payload storage still
      appears as `<UNSUPPORTED>` in the Valgrind-side trace and needs a deeper
      serializer patch before useful value summaries can be added.
-   - Known gap: `std::shared_ptr<std::string>` no longer breaks trace parsing,
-     but its pointee still renders as an unsupported struct rather than a clean
-     `std::string` value summary. Scalar and simple struct/class
-     shared-pointer pointees are verified.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

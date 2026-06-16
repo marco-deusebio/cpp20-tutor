@@ -1,0 +1,70 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -206,6 +206,37 @@ def get_std_string_pointer(obj):
+ 
+     return None
+ 
++
++def encode_std_string_value(obj, heap):
++    std_string_ptr = get_std_string_pointer(obj)
++    if std_string_ptr is None:
++        return None
++
++    if 'deref_val' in std_string_ptr:
++        encode_value(std_string_ptr['deref_val'], heap)
++    return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
++
++
++def find_first_std_string_object(obj):
++    if not obj:
++        return None
++
++    if get_std_string_pointer(obj) is not None:
++        return obj
++
++    if obj.get('kind') == 'heap_block' or obj.get('kind') == 'array':
++        for val in obj.get('val') or []:
++            found = find_first_std_string_object(val)
++            if found is not None:
++                return found
++
++    if obj.get('kind') == 'struct':
++        for val in (obj.get('val') or {}).values():
++            found = find_first_std_string_object(val)
++            if found is not None:
++                return found
++
++    return None
+ 
+ def parse_hex_ptr(val):
+     if not isinstance(val, basestring):
+@@ -476,8 +503,13 @@ def get_std_shared_ptr_summary(obj, heap):
+ 
+     deref_val = ptr.get('deref_val')
+     pointee = find_value_at_addr(deref_val, ptr.get('val')) if deref_val else None
++    if display_cpp_type(args[0]) == 'std::string':
++        string_pointee = find_first_std_string_object(deref_val)
++        if string_pointee is not None:
++            pointee = string_pointee
+     if pointee is not None:
+-        ret.append(['pointee', encode_value(pointee, heap)])
++        std_string_summary = encode_std_string_value(pointee, heap)
++        ret.append(['pointee', std_string_summary or encode_value(pointee, heap)])
+ 
+     return ret
+ 
+@@ -615,10 +647,8 @@ def encode_value(obj, heap):
+         return ['C_DATA', obj['addr'], 'pointer', obj['val']]
+ 
+     elif obj['kind'] == 'struct':
+-        std_string_ptr = get_std_string_pointer(obj)
+-        if std_string_ptr is not None:
+-            if 'deref_val' in std_string_ptr:
+-                encode_value(std_string_ptr['deref_val'], heap)
+-            return ['C_DATA', obj['addr'], 'std::string', std_string_ptr['val']]
++        std_string_summary = encode_std_string_value(obj, heap)
++        if std_string_summary is not None:
++            return std_string_summary
+ 
+         std_array_summary = get_std_array_summary(obj, heap)
+         if std_array_summary is not None:
