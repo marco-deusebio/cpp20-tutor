@@ -1,0 +1,99 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -555,6 +555,85 @@ def get_std_optional_summary(obj, heap):
+ 
+     return ret
+ 
++
++def get_direct_struct_member(obj, member_name):
++    if not obj or obj.get('kind') != 'struct':
++        return None
++    return (obj.get('val') or {}).get(member_name)
++
++
++def get_std_variant_alternative_node(union_obj, index):
++    current = union_obj
++    for _ in range(index):
++        current = get_direct_struct_member(current, '_M_rest')
++        if current is None:
++            return None
++    return get_direct_struct_member(current, '_M_first')
++
++
++def get_std_variant_alternative_value(alt_node):
++    if alt_node is None:
++        return None
++
++    storage = get_direct_struct_member(alt_node, '_M_storage')
++    if storage is not None:
++        return storage
++
++    return alt_node
++
++
++def get_std_variant_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'variant<' not in type_name:
++        return None
++
++    members = obj.get('val') or {}
++    union_obj = members.get('_M_u')
++    index_obj = members.get('_M_index')
++    if union_obj is None or index_obj is None:
++        return None
++
++    args = top_level_template_args(type_name, 'variant') or []
++    display_args = [display_cpp_type(arg) for arg in args]
++    if display_args:
++        display_type = 'std::variant<' + ', '.join(display_args) + '>'
++    else:
++        display_type = 'std::variant'
++
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['index', encode_value(index_obj, heap)]
++    ]
++
++    index_val = index_obj.get('val')
++    if not isinstance(index_val, (int, long)):
++        return ret
++
++    if index_val < 0 or index_val >= len(display_args):
++        ret.append([
++            'active_type',
++            ['C_DATA', index_obj.get('addr', obj['addr']), 'type', '<valueless>']
++        ])
++        return ret
++
++    active_type = display_args[index_val]
++    ret.append([
++        'active_type',
++        ['C_DATA', index_obj.get('addr', obj['addr']), 'type', active_type]
++    ])
++
++    alt_node = get_std_variant_alternative_node(union_obj, index_val)
++    alt_value = get_std_variant_alternative_value(alt_node)
++    if alt_value is not None:
++        ret.append(['value', encode_value(alt_value, heap)])
++
++    return ret
++
+ 
+ def get_std_tuple_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+@@ -700,6 +776,10 @@ def encode_value(obj, heap):
+         if std_optional_summary is not None:
+             return std_optional_summary
+ 
++        std_variant_summary = get_std_variant_summary(obj, heap)
++        if std_variant_summary is not None:
++            return std_variant_summary
++
+         std_tuple_summary = get_std_tuple_summary(obj, heap)
+         if std_tuple_summary is not None:
+             return std_tuple_summary

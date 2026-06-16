@@ -1,0 +1,61 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -514,6 +514,47 @@ def get_std_shared_ptr_summary(obj, heap):
+ 
+     return ret
+ 
++
++def get_std_optional_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'optional<' not in type_name:
++        return None
++
++    engaged = find_struct_member(obj, '_M_engaged')
++    value = find_struct_member(obj, '_M_value')
++    if engaged is None and value is None:
++        return None
++
++    args = top_level_template_args(type_name, 'optional') or ['value']
++    display_type = 'std::optional<' + display_cpp_type(args[0]) + '>'
++    ret = [
++        'C_STRUCT',
++        obj['addr'],
++        display_type
++    ]
++
++    engaged_val = None
++    if engaged is not None:
++        ret.append(['engaged', encode_value(engaged, heap)])
++        engaged_val = engaged.get('val')
++
++    if value is not None:
++        if engaged_val == 0:
++            ret.append([
++                'value',
++                ['C_DATA', value.get('addr', obj['addr']), display_cpp_type(args[0]), '<empty>']
++            ])
++        else:
++            std_string_summary = None
++            if display_cpp_type(args[0]) == 'std::string':
++                std_string_summary = encode_std_string_value(value, heap)
++            ret.append(['value', std_string_summary or encode_value(value, heap)])
++
++    return ret
++
+ 
+ def get_std_tuple_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+@@ -655,6 +696,10 @@ def encode_value(obj, heap):
+         if std_shared_ptr_summary is not None:
+             return std_shared_ptr_summary
+ 
++        std_optional_summary = get_std_optional_summary(obj, heap)
++        if std_optional_summary is not None:
++            return std_optional_summary
++
+         std_tuple_summary = get_std_tuple_summary(obj, heap)
+         if std_tuple_summary is not None:
+             return std_tuple_summary

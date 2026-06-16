@@ -27,9 +27,9 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:8a99ffbcdc8513f233594b5ea4606600b4033fe379ab34aaad0d154c4db93e96`
-from the `2026-06-16` rebuild that exposes union-backed libstdc++
-`std::optional` and `std::variant` payload storage to the trace.
+`sha256:662c4c5dbf7356a63ed3d13c79db2033d8e552d884c2b3fb55a98184da3e0be1`
+from the `2026-06-16` rebuild that renders clean `std::optional<T>`
+summaries and conservative `std::variant<T...>` active-alternative summaries.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -76,11 +76,15 @@ scalar, simple struct/class, and currently pointer-style `std::string`
 pointees. The Valgrind-side union field support now exposes raw libstdc++
 `std::optional` payload storage (`_M_value`) and `std::variant` alternative
 storage (`_M_u`, `_M_first`, `_M_rest`, `_M_index`) to the postprocessor.
-Nested heap pointers, `weak_ptr`, clean source-level `std::optional<T>` /
-`std::variant<T...>` summaries, general C++ container internals,
-non-null-terminated character buffers, bitfields, fuller inherited/base-class
-layout details, and some static-local/global edge cases still need additional
-forward-port work.
+Postprocessor summaries now render `std::optional<T>` with `engaged` and
+`value` fields for scalar, simple struct/class, and pointer-style
+`std::string` payloads. `std::variant<T...>` now renders its source-level
+template name, active `index`, active type, and only the selected alternative
+instead of every overlapping union branch. Nested heap pointers, `weak_ptr`,
+fuller `std::variant<std::string>` value decoding from aligned in-place
+storage, general C++ container internals, non-null-terminated character
+buffers, bitfields, fuller inherited/base-class layout details, and some
+static-local/global edge cases still need additional forward-port work.
 Top-level globals in the active user debug object now render into
 `globals`/`ordered_globals` using the same scalar, pointer, array, and
 struct/class encoders as locals.
@@ -265,6 +269,14 @@ Postprocessor patches live in
   `std::string` postprocessor summary when a `std::shared_ptr<std::string>`
   points inside a combined `make_shared` heap allocation, replacing the raw
   unsupported anonymous field with a clean pointer-style string pointee.
+- `0014-cpp-tutor-std-optional-summary.patch`: recognizes libstdc++
+  `std::optional<T>` wrappers now that union-backed `_M_value` storage is
+  visible, and returns a compact source-level summary with `engaged` and
+  `value` fields.
+- `0015-cpp-tutor-std-variant-summary.patch`: recognizes libstdc++
+  `std::variant<T...>` wrappers, uses `_M_index` to choose the active
+  `_M_first` alternative through the nested `_M_rest` union chain, and returns
+  a conservative summary with `index`, `active_type`, and the selected value.
 
 ## Porting Checklist
 
@@ -430,10 +442,19 @@ Postprocessor patches live in
      `10 15 cats dogs`, clean postprocess stderr, and Valgrind reporting zero
      errors. The raw trace now exposes optional `_M_value` payloads and variant
      `_M_u` alternatives instead of empty union shells.
-   - Known gap: `std::optional<T>` and `std::variant<T...>` still need clean
-     source-level postprocessor summaries. `std::variant<T...>` in particular
-     still shows noisy overlapping union alternatives even though `_M_index`
-     identifies the active alternative.
+   - Done: post-`0014`/`0015` optional/variant probe still compiles/runs with
+     stdout `10 15 cats dogs`, clean postprocess stderr, and Valgrind
+     reporting zero errors. `oi` renders as `std::optional<int>` with
+     `value = 10`, `op` renders as `std::optional<Point>` with
+     `Point{x = 2, y = 15}`, and `os` renders as `std::optional<std::string>`
+     with a pointer-style string value backed by the heap character buffer.
+     `v` renders as `std::variant<int, std::string>` with `index`,
+     `active_type`, and only the selected alternative; the `int` alternative
+     renders cleanly as `3`, while the active `std::string` alternative still
+     exposes raw aligned in-place storage bytes for `dogs`.
+   - Known gap: `std::variant<std::string>` still needs a dedicated decoder for
+     libstdc++ aligned in-place string storage if we want its active value to
+     collapse all the way to the existing pointer-style `std::string` summary.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
