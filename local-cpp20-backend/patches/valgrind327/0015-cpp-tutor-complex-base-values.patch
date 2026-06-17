@@ -1,0 +1,29 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4908,6 +4908,25 @@ static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
+       VG_(fprintf)(trace_fp, "\"<UNINITIALIZED>\"}");
+       return;
+    }
+ 
++   if (ent->Te.TyBase.name &&
++       VG_(strcmp)(ent->Te.TyBase.name, "complex float") == 0 &&
++       ent->Te.TyBase.szB == 2 * sizeof(float)) {
++      float* vals = (float*)data_addr;
++      VG_(fprintf)(trace_fp, "{\"real\":%f,\"imag\":%f}",
++                   vals[0], vals[1]);
++      VG_(fprintf)(trace_fp, "}");
++      return;
++   }
++   if (ent->Te.TyBase.name &&
++       VG_(strcmp)(ent->Te.TyBase.name, "complex double") == 0 &&
++       ent->Te.TyBase.szB == 2 * sizeof(double)) {
++      double* vals = (double*)data_addr;
++      VG_(fprintf)(trace_fp, "{\"real\":%f,\"imag\":%f}",
++                   vals[0], vals[1]);
++      VG_(fprintf)(trace_fp, "}");
++      return;
++   }
++
+    switch (ent->Te.TyBase.enc) {
+       case 'S':
+          if (ent->Te.TyBase.szB == sizeof(char)) {

@@ -27,7 +27,7 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:c930dffb8ca159b20a0f0d5ada5499c78155e541cc7a045a110186a85d2bb4a9`
+`sha256:b9c9bfd46e4644b05ae35ee8dc562ed19807b7cab1452d20566a6bbc76678f68`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
@@ -35,8 +35,8 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
 `std::atomic<T>` summaries, `std::initializer_list<T>` summaries, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
-`std::filesystem::path` summaries, plus JSON-safe stack/local `char`
-control-byte traces.
+`std::filesystem::path` summaries, `std::complex<T>` summaries, plus
+JSON-safe stack/local `char` control-byte traces.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -112,6 +112,10 @@ field for libstdc++ atomics backed by scalar `_M_i` storage.
 clean `target` pointer instead of raw `_M_data` internals.
 `std::monostate` now renders with the source-level `std::monostate` spelling
 both as a standalone value and as an active `std::variant` alternative.
+`std::filesystem::path` now renders with a source-level type and native
+`std::string` field. `std::complex<float>` and `std::complex<double>` now
+render with source-level type names and `real` / `imag` scalar fields once
+their underlying complex base value is initialized.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -253,6 +257,10 @@ Current tracked patches:
   JSON-safe character emitter used for C-string heap dereference payloads.
   This prevents raw control bytes in stack/local character data from corrupting
   `.vgtrace` JSON records.
+- `0015-cpp-tutor-complex-base-values.patch`: emits initialized Valgrind base
+  values named `complex float` and `complex double` as JSON objects with
+  `real` and `imag` components. Other complex base shapes remain unsupported
+  unless they match the exact expected two-component size.
 
 Postprocessor patches live in
 `local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
@@ -361,6 +369,10 @@ Postprocessor patches live in
   `std::filesystem::path` objects, hides raw `_M_pathname` / `_M_cmpts`
   internals, and renders a source-level `std::filesystem::path` summary with a
   native `std::string` value.
+- `0029-cpp-tutor-std-complex-summary.patch`: recognizes libstdc++
+  `std::complex<T>` objects whose `_M_value` base payload exposes `real` and
+  `imag`, then renders source-level `std::complex<T>` summaries with scalar
+  component fields instead of raw `_M_value` internals.
 
 ## Porting Checklist
 
@@ -613,6 +625,13 @@ Postprocessor patches live in
      reporting zero errors. `p` now renders as `std::filesystem::path` with a
      native `std::string` field instead of raw `_M_pathname` / `_M_cmpts`
      internals.
+   - Done: post-Valgrind-`0015`/post-`0029` `std::complex<double>` and
+     `std::complex<float>` probe compiles/runs with stdout `2 2 4.5`, clean
+     postprocess stderr, parseable JSON, and Valgrind reporting zero errors.
+     Initialized and mutated complex values render as `std::complex<T>` with
+     `real` and `imag` scalar fields instead of unsupported `_M_value` payloads.
+   - Done: post-`0029` smoke still produces trace JSON with ordered locals
+     `x,y`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for

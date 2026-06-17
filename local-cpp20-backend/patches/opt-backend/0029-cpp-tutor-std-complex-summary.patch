@@ -1,0 +1,73 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -744,6 +744,59 @@ def get_std_filesystem_path_summary(obj, heap):
+     ]
+ 
+ 
++def get_complex_display_type(type_name):
++    args = top_level_template_args(type_name, 'complex')
++    if args:
++        return 'std::complex<' + display_cpp_type(args[0]) + '>'
++    return 'std::complex'
++
++
++def get_complex_component_type(type_name, value_type):
++    args = top_level_template_args(type_name, 'complex')
++    if args:
++        return display_cpp_type(args[0])
++    if value_type == 'complex float':
++        return 'float'
++    if value_type == 'complex double':
++        return 'double'
++    return 'number'
++
++
++def get_std_complex_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'complex<' not in type_name:
++        return None
++
++    value = get_direct_struct_member(obj, '_M_value')
++    if value is None or value.get('kind') != 'base':
++        return None
++
++    components = value.get('val')
++    if not isinstance(components, dict):
++        return None
++    if 'real' not in components or 'imag' not in components:
++        return None
++
++    component_type = get_complex_component_type(type_name, value.get('type'))
++    component_size = sizeof_cpp_type(component_type) or 0
++    real_addr = value.get('addr', obj.get('addr'))
++    imag_addr = real_addr
++    parsed_addr = parse_hex_ptr(real_addr)
++    if parsed_addr is not None and component_size:
++        imag_addr = format_hex_addr(parsed_addr + component_size)
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        get_complex_display_type(type_name),
++        ['real', ['C_DATA', real_addr, component_type, components['real']]],
++        ['imag', ['C_DATA', imag_addr, component_type, components['imag']]]
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1363,6 +1416,10 @@ def encode_value(obj, heap):
+         if std_filesystem_path_summary is not None:
+             return std_filesystem_path_summary
+ 
++        std_complex_summary = get_std_complex_summary(obj, heap)
++        if std_complex_summary is not None:
++            return std_complex_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary
