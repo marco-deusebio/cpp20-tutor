@@ -1,0 +1,48 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -796,6 +796,34 @@ def get_std_complex_summary(obj, heap):
+     ]
+ 
+ 
++def get_std_error_value_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = display_cpp_type(obj.get('type') or '')
++    if type_name not in ('error_code', 'std::error_code',
++                         'error_condition', 'std::error_condition'):
++        return None
++
++    value = get_direct_struct_member(obj, '_M_value')
++    category = get_direct_struct_member(obj, '_M_cat')
++    if value is None or not category or category.get('kind') != 'pointer':
++        return None
++
++    if type_name.endswith('error_code'):
++        display_type = 'std::error_code'
++    else:
++        display_type = 'std::error_condition'
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['value', encode_value(value, heap)],
++        ['category', encode_value(category, heap)]
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1433,6 +1461,10 @@ def encode_value(obj, heap):
+         if std_complex_summary is not None:
+             return std_complex_summary
+ 
++        std_error_value_summary = get_std_error_value_summary(obj, heap)
++        if std_error_value_summary is not None:
++            return std_error_value_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary

@@ -27,7 +27,7 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:06da9803b7cd58bed018848e06940c78ae9750ca001747bd883ed54676a2e876`
+`sha256:161c6ef71222e2a8afd66d47f8b712b696a94c40b48896a086c4d989431a1cea`
 from the `2026-06-17` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
@@ -36,8 +36,8 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::atomic<T>` summaries, `std::initializer_list<T>` summaries, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
 `std::filesystem::path` summaries, `std::complex<T>` summaries,
-`std::byte` scalar values, plus JSON-safe stack/local `char` control-byte
-traces.
+`std::byte` scalar values, `std::error_code` / `std::error_condition`
+summaries, plus JSON-safe stack/local `char` control-byte traces.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -119,6 +119,9 @@ render with source-level type names and `real` / `imag` scalar fields once
 their underlying complex base value is initialized. `std::byte` now renders
 with the source-level type name and masks the raw enum payload to the active
 byte so initialization and bitwise mutation steps display stable values.
+`std::error_code` and `std::error_condition` now render with source-level type
+names, `value`, and `category` fields instead of raw `_M_value` / `_M_cat`
+internals.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -379,6 +382,9 @@ Postprocessor patches live in
 - `0030-cpp-tutor-std-byte-summary.patch`: normalizes scalar `std::byte`
   values to the source-level type name and masks the raw enum payload to one
   byte so step-by-step byte initialization and mutation display stable values.
+- `0031-cpp-tutor-std-error-code-summary.patch`: recognizes libstdc++
+  `std::error_code` and `std::error_condition` objects, hides raw `_M_value` /
+  `_M_cat` internals, and renders source-level `value` and `category` fields.
 
 ## Porting Checklist
 
@@ -640,7 +646,12 @@ Postprocessor patches live in
      postprocess stderr, parseable JSON, and Valgrind reporting zero errors.
      The byte local renders as `std::byte`, changes from `42` to `84`, and no
      longer exposes noisy high bits from the raw enum read.
-   - Done: post-`0030` smoke still produces trace JSON with ordered locals
+   - Done: post-`0031` `std::error_code` / `std::error_condition` probe
+     compiles/runs with stdout `13 13`, clean postprocess stderr, parseable
+     JSON, and Valgrind reporting zero errors. Both locals render with
+     source-level type names plus `value` and `category` fields instead of raw
+     libstdc++ member names.
+   - Done: post-`0031` smoke still produces trace JSON with ordered locals
      `x,y`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
