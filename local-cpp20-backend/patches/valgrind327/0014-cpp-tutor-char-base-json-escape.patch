@@ -1,0 +1,18 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4908,15 +4908,9 @@ static void pg_emit_minimal_varinfo(const XArray* tyents, UWord typeR,
+    switch (ent->Te.TyBase.enc) {
+       case 'S':
+          if (ent->Te.TyBase.szB == sizeof(char)) {
+-            HChar str[3];
+             HChar val = *((char*)data_addr);
+-            if (val == '\0') {
+-               str[0] = '\\'; str[1] = '0'; str[2] = 0;
+-            } else {
+-               str[0] = val; str[1] = 0;
+-            }
+-            pg_emit_json_string(trace_fp, str);
++            pg_emit_json_char_value(trace_fp, val);
+          } else if (ent->Te.TyBase.szB == sizeof(short)) {
+             VG_(fprintf)(trace_fp, "%d", *((short*)data_addr));
+          } else if (ent->Te.TyBase.szB == sizeof(int)) {

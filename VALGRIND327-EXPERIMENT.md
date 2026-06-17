@@ -27,14 +27,15 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:4263d755764aa88e59f80ddb18c4984374ccdb6a322da6b8f1f84bbf133de2b6`
+`sha256:6064848f9b23991e52b9aea003ffc425003d5c90b37968a8cd7404dda35b146e`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
 `std::atomic<T>` summaries, `std::initializer_list<T>` summaries, and
-`std::reference_wrapper<T>` summaries, and `std::monostate` summaries.
+`std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
+JSON-safe stack/local `char` control-byte traces.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -214,8 +215,9 @@ Current tracked patches:
   includes a `deref_val` heap-block payload. The postprocessor then places that
   payload into `heap`, so string literals such as `const char* msg = "hey"` and
   suffix pointers such as `msg + 1` render as character arrays. The Valgrind
-  emitter also escapes arbitrary control bytes as JSON unicode escapes, which
-  keeps library-managed character buffers parseable even when they contain
+  emitter also escapes arbitrary control bytes from heap-backed character
+  buffers and stack/local `char` values as JSON unicode escapes, which keeps
+  library-managed character buffers parseable even when they contain
   non-printable bookkeeping bytes.
 - `0009-cpp-tutor-heap-pointer-deref.patch`: extends pointer/reference
   serialization for non-character pointees. If a top-level pointer refers into
@@ -245,6 +247,11 @@ Current tracked patches:
   zero-offset fields, then lets the direct serializer emit complete unions.
   This exposes libstdc++ union-backed storage used by `std::optional<T>` and
   `std::variant<T...>` to the postprocessor.
+- `0014-cpp-tutor-char-base-json-escape.patch`: routes scalar signed `char`
+  values, including stack-array elements and struct fields, through the same
+  JSON-safe character emitter used for C-string heap dereference payloads.
+  This prevents raw control bytes in stack/local character data from corrupting
+  `.vgtrace` JSON records.
 
 Postprocessor patches live in
 `local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
@@ -588,9 +595,14 @@ Postprocessor patches live in
    - Blocked for now: `std::source_location` is not available in the current
      GCC 10 experimental image (`fatal error: source_location: No such file or
      directory`).
-   - Needs Valgrind-side follow-up: `std::filesystem::path` compiles/runs, but
-     the raw trace can contain unescaped stack character-array control bytes in
-     libstdc++ path/string internals before postprocessing can summarize it.
+   - Done: post-Valgrind-`0014` stack `char` control-byte probe emits
+     parseable JSON with raw control bytes escaped, clean postprocess stderr,
+     and Valgrind reporting zero errors.
+   - Done: post-Valgrind-`0014` `std::filesystem::path` probe that previously
+     produced `Ugh, bad record!` now compiles/runs with stdout
+     `/tmp/example.txt example.txt`, parseable JSON, clean postprocess stderr,
+     and Valgrind reporting zero errors. `p` still renders through raw `path`
+     / string internals for now; this patch only fixes trace safety.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
