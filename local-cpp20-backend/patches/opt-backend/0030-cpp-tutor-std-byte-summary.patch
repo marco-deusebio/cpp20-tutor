@@ -1,0 +1,29 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -299,6 +299,16 @@ def display_cpp_type(type_name):
+     return normalized
+ 
+ 
++def encode_std_byte_value(obj):
++    if obj.get('kind') != 'base' or display_cpp_type(obj.get('type')) != 'byte':
++        return None
++
++    value = obj.get('val')
++    if isinstance(value, (int, long)):
++        value = value & 0xff
++    return ['C_DATA', obj['addr'], 'std::byte', value]
++
++
+ def sizeof_cpp_type(type_name):
+     normalized = (type_name or '').strip()
+     if normalized in ('char', 'signed char', 'unsigned char', 'bool'):
+@@ -1365,6 +1375,9 @@ def get_std_vector_summary(obj, heap):
+ # returns an encoded value in OPT format and possibly mutates the heap
+ def encode_value(obj, heap):
+     if obj['kind'] == 'base':
++        std_byte_summary = encode_std_byte_value(obj)
++        if std_byte_summary is not None:
++            return std_byte_summary
+         return ['C_DATA', obj['addr'], obj['type'], obj['val']]
+ 
+     elif obj['kind'] == 'pointer':

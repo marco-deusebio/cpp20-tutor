@@ -27,16 +27,17 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:b9c9bfd46e4644b05ae35ee8dc562ed19807b7cab1452d20566a6bbc76678f68`
-from the `2026-06-16` rebuild that renders clean `std::optional<T>`
+`sha256:06da9803b7cd58bed018848e06940c78ae9750ca001747bd883ed54676a2e876`
+from the `2026-06-17` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
 `std::atomic<T>` summaries, `std::initializer_list<T>` summaries, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
-`std::filesystem::path` summaries, `std::complex<T>` summaries, plus
-JSON-safe stack/local `char` control-byte traces.
+`std::filesystem::path` summaries, `std::complex<T>` summaries,
+`std::byte` scalar values, plus JSON-safe stack/local `char` control-byte
+traces.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -115,7 +116,9 @@ both as a standalone value and as an active `std::variant` alternative.
 `std::filesystem::path` now renders with a source-level type and native
 `std::string` field. `std::complex<float>` and `std::complex<double>` now
 render with source-level type names and `real` / `imag` scalar fields once
-their underlying complex base value is initialized.
+their underlying complex base value is initialized. `std::byte` now renders
+with the source-level type name and masks the raw enum payload to the active
+byte so initialization and bitwise mutation steps display stable values.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -373,6 +376,9 @@ Postprocessor patches live in
   `std::complex<T>` objects whose `_M_value` base payload exposes `real` and
   `imag`, then renders source-level `std::complex<T>` summaries with scalar
   component fields instead of raw `_M_value` internals.
+- `0030-cpp-tutor-std-byte-summary.patch`: normalizes scalar `std::byte`
+  values to the source-level type name and masks the raw enum payload to one
+  byte so step-by-step byte initialization and mutation display stable values.
 
 ## Porting Checklist
 
@@ -630,7 +636,11 @@ Postprocessor patches live in
      postprocess stderr, parseable JSON, and Valgrind reporting zero errors.
      Initialized and mutated complex values render as `std::complex<T>` with
      `real` and `imag` scalar fields instead of unsupported `_M_value` payloads.
-   - Done: post-`0029` smoke still produces trace JSON with ordered locals
+   - Done: post-`0030` `std::byte` probe compiles/runs with stdout `84`, clean
+     postprocess stderr, parseable JSON, and Valgrind reporting zero errors.
+     The byte local renders as `std::byte`, changes from `42` to `84`, and no
+     longer exposes noisy high bits from the raw enum read.
+   - Done: post-`0030` smoke still produces trace JSON with ordered locals
      `x,y`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
