@@ -1,0 +1,46 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -717,6 +717,32 @@ def get_std_monostate_summary(obj, heap):
+     ]
+ 
+ 
++def get_std_filesystem_path_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    display_type = display_cpp_type(type_name)
++    if display_type not in ('path', 'std::filesystem::path', 'std::filesystem::__cxx11::path'):
++        if 'filesystem' not in type_name or 'path' not in type_name:
++            return None
++
++    pathname = get_direct_struct_member(obj, '_M_pathname')
++    if pathname is None:
++        return None
++
++    value = encode_value(pathname, heap)
++    if not (isinstance(value, list) and len(value) >= 3 and value[0] == 'C_DATA' and value[2] == 'std::string'):
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        'std::filesystem::path',
++        ['native', value]
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1334,6 +1360,10 @@ def encode_value(obj, heap):
+         if std_monostate_summary is not None:
+             return std_monostate_summary
+ 
++        std_filesystem_path_summary = get_std_filesystem_path_summary(obj, heap)
++        if std_filesystem_path_summary is not None:
++            return std_filesystem_path_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary

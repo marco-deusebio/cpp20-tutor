@@ -27,7 +27,7 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:6064848f9b23991e52b9aea003ffc425003d5c90b37968a8cd7404dda35b146e`
+`sha256:c930dffb8ca159b20a0f0d5ada5499c78155e541cc7a045a110186a85d2bb4a9`
 from the `2026-06-16` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
@@ -35,7 +35,8 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::chrono` duration/time-point summaries, `std::bitset<N>` summaries, and
 `std::atomic<T>` summaries, `std::initializer_list<T>` summaries, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
-JSON-safe stack/local `char` control-byte traces.
+`std::filesystem::path` summaries, plus JSON-safe stack/local `char`
+control-byte traces.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -356,6 +357,10 @@ Postprocessor patches live in
 - `0027-cpp-tutor-std-monostate-summary.patch`: normalizes `monostate` type
   spellings to `std::monostate` and renders standalone or variant-contained
   monostate values as empty source-level structs.
+- `0028-cpp-tutor-std-filesystem-path-summary.patch`: recognizes libstdc++
+  `std::filesystem::path` objects, hides raw `_M_pathname` / `_M_cmpts`
+  internals, and renders a source-level `std::filesystem::path` summary with a
+  native `std::string` value.
 
 ## Porting Checklist
 
@@ -601,8 +606,13 @@ Postprocessor patches live in
    - Done: post-Valgrind-`0014` `std::filesystem::path` probe that previously
      produced `Ugh, bad record!` now compiles/runs with stdout
      `/tmp/example.txt example.txt`, parseable JSON, clean postprocess stderr,
-     and Valgrind reporting zero errors. `p` still renders through raw `path`
-     / string internals for now; this patch only fixes trace safety.
+     and Valgrind reporting zero errors.
+   - Done: post-`0028` `std::filesystem::path` construction and mutation probes
+     compile/run with stdout `/tmp/example.txt example.txt` and
+     `/tmp/example.log`, clean postprocess stderr, parseable JSON, and Valgrind
+     reporting zero errors. `p` now renders as `std::filesystem::path` with a
+     native `std::string` field instead of raw `_M_pathname` / `_M_cmpts`
+     internals.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
