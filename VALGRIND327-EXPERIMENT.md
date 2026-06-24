@@ -27,8 +27,8 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:161c6ef71222e2a8afd66d47f8b712b696a94c40b48896a086c4d989431a1cea`
-from the `2026-06-17` rebuild that renders clean `std::optional<T>`
+`sha256:16f9c9c7dc6543b75f9f3ab1d5561a19130786200fee1cb51578f29815d5d5c5`
+from the `2026-06-24` rebuild that renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
@@ -37,7 +37,8 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
 `std::filesystem::path` summaries, `std::complex<T>` summaries,
 `std::byte` scalar values, `std::error_code` / `std::error_condition`
-summaries, plus JSON-safe stack/local `char` control-byte traces.
+summaries, `std::any` engagement summaries, plus JSON-safe stack/local `char`
+control-byte traces.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -121,7 +122,10 @@ with the source-level type name and masks the raw enum payload to the active
 byte so initialization and bitwise mutation steps display stable values.
 `std::error_code` and `std::error_condition` now render with source-level type
 names, `value`, and `category` fields instead of raw `_M_value` / `_M_cat`
-internals.
+internals. `std::any` now renders with a source-level type and `has_value`
+field that follows construction, assignment, and reset steps. The stored
+payload type/value remains intentionally hidden because the available
+libstdc++ trace contains only an opaque manager function and untyped storage.
 Nested heap pointers, non-SSO variant string payloads, broader variant
 alternative shapes, general C++ container internals, non-null-terminated
 non-view character buffers, bitfields, fuller inherited/base-class layout
@@ -385,6 +389,9 @@ Postprocessor patches live in
 - `0031-cpp-tutor-std-error-code-summary.patch`: recognizes libstdc++
   `std::error_code` and `std::error_condition` objects, hides raw `_M_value` /
   `_M_cat` internals, and renders source-level `value` and `category` fields.
+- `0032-cpp-tutor-std-any-summary.patch`: recognizes libstdc++ `std::any`
+  objects, hides opaque manager/storage internals, and renders a source-level
+  `has_value` field while preserving uninitialized state.
 
 ## Porting Checklist
 
@@ -651,7 +658,11 @@ Postprocessor patches live in
      JSON, and Valgrind reporting zero errors. Both locals render with
      source-level type names plus `value` and `category` fields instead of raw
      libstdc++ member names.
-   - Done: post-`0031` smoke still produces trace JSON with ordered locals
+   - Done: post-`0032` `std::any` probe compiles/runs with stdout `1 0`, clean
+     postprocess stderr, parseable JSON, and Valgrind reporting zero errors.
+     The local renders as `std::any`; `has_value` changes from uninitialized to
+     `true`, then to `false` after `reset()`.
+   - Done: post-`0032` smoke still produces trace JSON with ordered locals
      `x,y`.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.

@@ -1,0 +1,47 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -833,6 +833,33 @@ def get_std_error_value_summary(obj, heap):
+     ]
+ 
+ 
++def get_std_any_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = display_cpp_type(obj.get('type') or '')
++    if type_name not in ('any', 'std::any'):
++        return None
++
++    manager = get_direct_struct_member(obj, '_M_manager')
++    if not manager or manager.get('kind') != 'pointer':
++        return None
++
++    manager_value = manager.get('val')
++    parsed_manager = parse_hex_ptr(manager_value)
++    if parsed_manager is None:
++        has_value = manager_value
++    else:
++        has_value = parsed_manager != 0
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        'std::any',
++        ['has_value', ['C_DATA', manager.get('addr', obj['addr']), 'bool', has_value]]
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1468,6 +1495,10 @@ def encode_value(obj, heap):
+         if std_error_value_summary is not None:
+             return std_error_value_summary
+ 
++        std_any_summary = get_std_any_summary(obj, heap)
++        if std_any_summary is not None:
++            return std_any_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary
