@@ -1,0 +1,12 @@
+--- a/run_cpp_backend.py
++++ b/run_cpp_backend.py
+@@ -53,7 +53,8 @@ with open(F_PATH, 'w') as f:
+     f.write(USER_PROGRAM)
+ 
+ # compile it!
+-p = Popen([CC, DIALECT, '-ggdb', '-O0', '-fno-omit-frame-pointer', '-o', EXE_PATH, F_PATH],
++p = Popen([CC, DIALECT, '-ggdb', '-O0', '-fno-omit-frame-pointer',
++           '-pthread', '-o', EXE_PATH, F_PATH],
+           stdout=PIPE, stderr=PIPE)
+ (gcc_stdout, gcc_stderr) = p.communicate()
+ gcc_retcode = p.returncode

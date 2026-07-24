@@ -3,6 +3,7 @@ FROM cpp-tutor/opt-cpp-backend-cpp20:local
 RUN cat > /tmp/opt-cpp-backend/run_cpp_backend_cpp20_wrapper.py <<'PY'
 #!/usr/bin/env python
 import json
+import os
 import re
 import sys
 
@@ -735,6 +736,49 @@ def is_internal_frame(frame):
     )
 
 
+def normalize_coroutine_func_name(func_name):
+    if '[clone .actor]' not in func_name:
+        return func_name
+    return func_name.split('(', 1)[0] + '() [coroutine body]'
+
+
+def clean_coroutine_frame(frame):
+    func_name = frame.get('func_name', '')
+    is_actor = '[clone .actor]' in func_name
+    renamed = {
+        '_Coro_promise': 'promise',
+        '_Coro_resume_index': 'resume_state',
+    } if is_actor else {}
+
+    encoded_locals = frame.get('encoded_locals')
+    if encoded_locals:
+        for old_name, new_name in renamed.items():
+            if old_name in encoded_locals:
+                encoded_locals[new_name] = encoded_locals.pop(old_name)
+
+        for name in list(encoded_locals.keys()):
+            if name.startswith('_Coro_'):
+                del encoded_locals[name]
+            elif is_actor and name in ('frame_ptr', 'Is', 'Fs'):
+                del encoded_locals[name]
+
+    ordered_varnames = frame.get('ordered_varnames')
+    if ordered_varnames:
+        cleaned_names = []
+        for name in ordered_varnames:
+            if name in renamed:
+                cleaned_names.append(renamed[name])
+            elif name.startswith('_Coro_'):
+                continue
+            elif is_actor and name in ('frame_ptr', 'Is', 'Fs'):
+                continue
+            else:
+                cleaned_names.append(name)
+        frame['ordered_varnames'] = cleaned_names
+
+    frame['func_name'] = normalize_coroutine_func_name(func_name)
+
+
 def filter_synthetic_trace(data):
     original_lines = len(data.get('code', '').split('\n'))
     filtered_trace = []
@@ -747,6 +791,7 @@ def filter_synthetic_trace(data):
         line = entry.get('line')
         if isinstance(line, int) and line > original_lines:
             continue
+        entry['func_name'] = normalize_coroutine_func_name(entry.get('func_name', ''))
 
         stack = entry.get('stack_to_render')
         if stack:
@@ -768,6 +813,7 @@ def filter_synthetic_trace(data):
                         if not name.startswith('__cpp_tutor_')
                     ]
 
+                clean_coroutine_frame(frame)
                 visible_stack.append(frame)
 
             entry['stack_to_render'] = visible_stack
@@ -780,6 +826,10 @@ def filter_synthetic_trace(data):
 
 def rewrite_code(code):
     rewritten = code
+    native_cpp20 = os.environ.get('CPP_TUTOR_NATIVE_CPP20') == '1'
+
+    if native_cpp20:
+        return rewritten
 
     rewritten = rewrite_numbers(rewritten)
     rewritten = rewrite_ssize(rewritten)
@@ -820,7 +870,7 @@ try:
 
     if rewritten_code != original_code:
         data['code'] = original_code
-        data = filter_synthetic_trace(data)
+    data = filter_synthetic_trace(data)
 
     sys.stdout.write(json.dumps(data))
 except Exception:

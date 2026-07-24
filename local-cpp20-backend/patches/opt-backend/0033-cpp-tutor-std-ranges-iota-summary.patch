@@ -1,0 +1,78 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -860,6 +860,60 @@ def get_std_any_summary(obj, heap):
+     ]
+ 
+ 
++def get_std_ranges_iota_view_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = obj.get('type') or ''
++    if 'iota_view<' not in type_name:
++        return None
++
++    start = get_direct_struct_member(obj, '_M_value')
++    bound = get_direct_struct_member(obj, '_M_bound')
++    if start is None or bound is None:
++        return None
++
++    args = top_level_template_args(type_name, 'iota_view')
++    if args:
++        display_type = 'std::ranges::iota_view<' + ', '.join(
++            display_cpp_type(arg) for arg in args
++        ) + '>'
++    else:
++        display_type = 'std::ranges::iota_view'
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['start', encode_value(start, heap)],
++        ['end', encode_value(bound, heap)]
++    ]
++
++
++def get_std_ranges_iota_iterator_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = display_cpp_type(obj.get('type') or '')
++    if type_name not in ('_Iterator', 'std::ranges::iota_view::_Iterator'):
++        return None
++
++    members = obj.get('val') or {}
++    if set(members.keys()) != set(['_M_value']):
++        return None
++
++    current = get_direct_struct_member(obj, '_M_value')
++    if current is None:
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        'std::ranges::iota_view::iterator',
++        ['current', encode_value(current, heap)]
++    ]
++
++
+ def get_string_view_characters(ptr, size, heap):
+     if not isinstance(size, (int, long)) or size < 0:
+         return None
+@@ -1495,6 +1549,14 @@ def encode_value(obj, heap):
+         if std_any_summary is not None:
+             return std_any_summary
+ 
++        std_ranges_iota_view_summary = get_std_ranges_iota_view_summary(obj, heap)
++        if std_ranges_iota_view_summary is not None:
++            return std_ranges_iota_view_summary
++
++        std_ranges_iota_iterator_summary = get_std_ranges_iota_iterator_summary(obj, heap)
++        if std_ranges_iota_iterator_summary is not None:
++            return std_ranges_iota_iterator_summary
++
+         std_string_view_summary = get_std_string_view_summary(obj, heap)
+         if std_string_view_summary is not None:
+             return std_string_view_summary

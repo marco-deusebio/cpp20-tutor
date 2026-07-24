@@ -39,11 +39,13 @@ Or, after installing the local command shim:
 cpp20-tutor
 
 This image is intentionally separate from the stable local backend. It keeps
-the current wrapper layer but points `run_cpp_backend.py` at Valgrind 3.27.1.
-The current experimental patch stack restores cpp-tutor trace emission and
-basic step-by-step stack/line visualization, but local/global variable value
-serialization is still being forward-ported. See `VALGRIND327-EXPERIMENT.md`
-for the current status and patch-porting checklist.
+the current wrapper layer, points `run_cpp_backend.py` at Valgrind 3.27.1, and
+uses GCC 11.4 for native C++20 user programs. The experimental patch stack
+restores cpp-tutor trace emission, local/global values, source-level summaries
+for many standard-library types, native range iteration, C++20 threading, and
+cleaned coroutine call/return visualization. See `VALGRIND327-EXPERIMENT.md`
+for the verified feature list, remaining representation limits, and
+patch-porting checklist.
 
 ## Stop
 Press Ctrl+C in the terminal running ./start-all.sh

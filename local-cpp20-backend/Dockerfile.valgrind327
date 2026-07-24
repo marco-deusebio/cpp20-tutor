@@ -94,6 +94,16 @@ RUN /tmp/opt-cpp-backend/valgrind-3.27.1/inst/bin/valgrind --version \
     && grep -n "DIALECT\\|VALGRIND_EXE\\|read-var-info" /tmp/opt-cpp-backend/run_cpp_backend.py \
     && g++ --version
 
+RUN apt-get update \
+    && apt-get install -y gcc-11 g++-11 \
+    && update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 110 \
+    && update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-11 110 \
+    && rm -rf /var/lib/apt/lists/* \
+    && gcc --version \
+    && g++ --version
+
+ENV CPP_TUTOR_NATIVE_CPP20=1
+
 COPY patches/opt-backend /tmp/opt-backend-patches
 
 RUN cd /tmp/opt-cpp-backend \

@@ -27,8 +27,16 @@ Valgrind 3.27.1 builds and runs in the experimental Docker image with the
 cpp-tutor trace flags restored. The current patch stack emits valid
 step-by-step trace JSON with stdout, source line/function metadata, and stack
 frames. The latest verified wrapper image is
-`sha256:16f9c9c7dc6543b75f9f3ab1d5561a19130786200fee1cb51578f29815d5d5c5`
-from the `2026-06-24` rebuild that renders clean `std::optional<T>`
+`sha256:fd26d44ce06dbf34cade3dab4a104820fbe10ead97317f4bc316525384e3320a`
+from the `2026-07-23` rebuild. Valgrind itself remains built with GCC 10 for
+porting stability, while a later image layer selects GCC 11.4 for user
+programs. Native C++20 source now passes through unchanged instead of using
+the GCC 10 compatibility rewrites. Verified native features include concepts,
+`std::bit_cast`, `std::numbers`, `std::span`, `std::ranges::iota_view`,
+`std::source_location`, coroutines, and `std::jthread`; the backend links user
+programs with `-pthread`.
+
+The current image renders clean `std::optional<T>`
 summaries, conservative `std::variant<T...>` active-alternative summaries, and
 small-string active alternatives inside `std::variant<int, std::string>`, plus
 source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
@@ -38,7 +46,11 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::filesystem::path` summaries, `std::complex<T>` summaries,
 `std::byte` scalar values, `std::error_code` / `std::error_condition`
 summaries, `std::any` engagement summaries, plus JSON-safe stack/local `char`
-control-byte traces.
+control-byte traces. Native `std::ranges::iota_view` values render with
+source-level `start` and `end` fields, and their iterators render a `current`
+value that advances step by step. Coroutine actor frames are labeled as
+`[coroutine body]`; compiler-only frame fields are hidden while `promise` and
+`resume_state` remain visible.
 
 The image is still a patch-porting sandbox rather than a drop-in replacement
 for the stable local backend. The latest source-side patch adds an incremental
@@ -152,6 +164,10 @@ needed by the local traversal patch.
   through the experimental wrapper image. It reports whether the image is still
   at the old unknown-option baseline, has advanced to trace emission, and
   whether ordered local variable names are visible yet.
+- `tools/smoke-valgrind327-modern-cpp.sh` verifies native concepts, bit
+  utilities, numbers, ranges, source locations, spans, `std::jthread`, iota
+  summaries, and cleaned coroutine frames with nonempty traces and zero
+  Valgrind errors.
 
 ## Patch Surface
 
@@ -392,6 +408,12 @@ Postprocessor patches live in
 - `0032-cpp-tutor-std-any-summary.patch`: recognizes libstdc++ `std::any`
   objects, hides opaque manager/storage internals, and renders a source-level
   `has_value` field while preserving uninitialized state.
+- `0033-cpp-tutor-std-ranges-iota-summary.patch`: recognizes libstdc++
+  `std::ranges::iota_view` and its iterator, rendering source-level
+  `start` / `end` bounds and a step-by-step `current` iterator value.
+- `0034-cpp-tutor-thread-link-support.patch`: adds `-pthread` to user-program
+  compilation so C++20 threading facilities such as `std::jthread` link and
+  run inside the tracer.
 
 ## Porting Checklist
 
@@ -628,9 +650,10 @@ Postprocessor patches live in
      `1 42`, clean postprocess stderr, parseable JSON, and Valgrind reporting
      zero errors. The standalone `empty_tag` and the variant's active empty
      alternative both render as `std::monostate`.
-   - Blocked for now: `std::source_location` is not available in the current
-     GCC 10 experimental image (`fatal error: source_location: No such file or
-     directory`).
+   - Done: the GCC 11 user-program layer compiles `std::source_location` and
+     traces calls to its accessors. The object currently renders its
+     implementation pointer because Valgrind's raw trace does not serialize
+     the pointed-to read-only static metadata record.
    - Done: post-Valgrind-`0014` stack `char` control-byte probe emits
      parseable JSON with raw control bytes escaped, clean postprocess stderr,
      and Valgrind reporting zero errors.
@@ -664,6 +687,17 @@ Postprocessor patches live in
      `true`, then to `false` after `reset()`.
    - Done: post-`0032` smoke still produces trace JSON with ordered locals
      `x,y`.
+   - Done: post-`0033` native `std::views::iota(2, 7)` probe produces ten
+     source steps with zero Valgrind errors. The view renders `start = 2` and
+     `end = 7`; the iterator's `current` field advances from `2` to `3`.
+   - Done: post-`0034` combined concepts/bit/ranges/source-location/span/
+     numbers probe, coroutine probe, and `std::jthread` probe all compile and
+     produce nonempty traces with zero Valgrind errors. Coroutine traces keep
+     source call/return steps and show `promise` / `resume_state` without
+     compiler-generated `_Coro_*` clutter.
+   - Known compiler-library boundary: GCC 11's libstdc++ does not provide
+     `<format>`. Supporting that facility requires a newer user-program
+     toolchain/library layer or a deliberately scoped compatibility library.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
