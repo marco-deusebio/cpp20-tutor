@@ -896,5 +896,34 @@ Postprocessor patches live in
      toolchain/library layer or a deliberately scoped compatibility library.
 5. Run modern C++ wrapper tests and compare trace shape against the stable
    `cpp-tutor/opt-cpp-backend-cpp20-sb:local` image.
+   - Done: `tools/compare-backends.sh` runs the probe corpus through both
+     backends and `tools/analyze-backend-comparison.py` reports, per probe,
+     whether each produced a usable trace and how the rendered type names
+     differ. Across 29 probes the stable backend produced 22 usable traces and
+     the experimental backend 29.
+   - The stable Valgrind 3.11 backend cannot trace several ordinary modern C++
+     programs. Seven probes -- `empty_containers`, `long_string`,
+     `stdlib_misc`, `string_view_slice`, `tuple_mixed`, `unicode_string`, and
+     `wide_strings` -- return a zero-step trace after Valgrind dies on
+     `m_debuginfo/tytypes.c:771 (vgModuleLocal_pg_pp_varinfo): Assertion
+     'ent->Te.TyStOrUn.isStruct' failed`. Every one of them involves
+     `std::string` or a container of them. `complex_check` and
+     `complex_span_tuple` are not fatal but stop after three steps.
+   - Where both backends work, the experimental line renders source-level type
+     names and the stable line renders raw template spellings: `std::map<int,
+     int>` against `map<int, int, std::less<int>, std::allocator<std::pair<int
+     const, int> > >`, `std::optional<std::string>` against
+     `optional<std::__cxx11::basic_string<...> >`, `std::span<int>` against
+     `span<int, 18446744073709551615>`. No probe rendered better on the stable
+     backend. This answers whether the postprocessor summaries could be ported
+     onto the 3.11 line: the tracer underneath them fails first.
+   - Known gap: summaries bail out while a value is still uninitialized and
+     expose raw members for those steps. Valgrind reports unwritten storage as
+     the sentinel string `<UNINITIALIZED>` instead of the value shape each
+     summary expects. Fixed so far for `std::complex` (`0042`); still present
+     for `std::bitset`, which renders `_M_w` until its first assignment. The
+     smoke suite's generic leak guard does not yet list `_M_w` or `_M_i`, so it
+     does not catch these. Auditing every summary against its uninitialized
+     state is the general fix.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
    browser testing.
