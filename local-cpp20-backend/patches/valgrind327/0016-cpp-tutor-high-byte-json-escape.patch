@@ -1,0 +1,11 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4544,7 +4544,7 @@ static void pg_emit_json_char_value(VgFile* trace_fp, 
+       case '\r': VG_(fprintf)(trace_fp, "\"\\\\r\""); break;
+       case '\t': VG_(fprintf)(trace_fp, "\"\\\\t\""); break;
+       default:
+-         if ((UChar)ch < 0x20)
++         if ((UChar)ch < 0x20 || (UChar)ch >= 0x7f)
+             VG_(fprintf)(trace_fp, "\"\\\\u%04x\"", (UInt)(UChar)ch);
+          else
+             VG_(fprintf)(trace_fp, "\"%c\"", ch);

@@ -45,8 +45,9 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
 `std::filesystem::path` summaries, `std::complex<T>` summaries,
 `std::byte` scalar values, `std::error_code` / `std::error_condition`
-summaries, `std::any` engagement summaries, plus JSON-safe stack/local `char`
-control-byte traces. Native `std::ranges::iota_view` values render with
+summaries, `std::any` engagement summaries, plus JSON-safe stack/local
+`char` traces for both control bytes and bytes at or above `0x7f`.
+Native `std::ranges::iota_view` values render with
 source-level `start` and `end` fields, and their iterators render a `current`
 value that advances step by step. Coroutine actor frames are labeled as
 `[coroutine body]`; compiler-only frame fields are hidden while `promise` and
@@ -287,6 +288,13 @@ Current tracked patches:
   values named `complex float` and `complex double` as JSON objects with
   `real` and `imag` components. Other complex base shapes remain unsupported
   unless they match the exact expected two-component size.
+- `0016-cpp-tutor-high-byte-json-escape.patch`: extends the JSON-safe character
+  emitter to bytes at or above `0x7f`, which previously reached the trace as
+  raw bytes. Those bytes are not valid UTF-8, so the postprocessor rejected the
+  whole record and silently dropped every later step; a single negative `char`
+  such as `signed char low = -1` produced an empty trace. High bytes now emit
+  as `\uXXXX` display tokens, matching the postprocessor's own
+  `escape_trace_char` convention.
 
 Postprocessor patches live in
 `local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
@@ -695,6 +703,19 @@ Postprocessor patches live in
      produce nonempty traces with zero Valgrind errors. Coroutine traces keep
      source call/return steps and show `promise` / `resume_state` without
      compiler-generated `_Coro_*` clutter.
+   - Done: post-Valgrind-`0016` high-byte escape probe fixes a trace-destroying
+     bug. Before the patch, a single `signed char low = -1` emitted a raw `0xff`
+     byte into the record, which is not valid UTF-8; the postprocessor rejected
+     the record with `Ugh, bad record!` and dropped every step, so the probe
+     produced a **0-step trace** while Valgrind still reported
+     `ERROR SUMMARY: 0 errors`. The same probe now produces six steps with
+     `low = \u00ff`, `high = \u0080`, `mid = \u00c8`, `total` reaching `-57`,
+     and stdout `-57 128`.
+   - Done: post-`0016` `std::string` regression keeps `shorty` and `longer`
+     rendering as clean `std::string` values reaching stdout
+     `cats Hippopotamus`, and a string carrying the high bytes `0xc3 0xa9` now
+     renders its heap character array as `c, a, \u00c3, \u00a9, \0` instead of
+     truncating the trace.
    - Known compiler-library boundary: GCC 11's libstdc++ does not provide
      `<format>`. Supporting that facility requires a newer user-program
      toolchain/library layer or a deliberately scoped compatibility library.

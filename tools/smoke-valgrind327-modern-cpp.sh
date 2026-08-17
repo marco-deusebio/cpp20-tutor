@@ -51,6 +51,20 @@ if name == "iota":
         if expected not in rendered:
             raise SystemExit("iota: missing summary token %s" % expected)
 
+if name == "high_bytes":
+    # a char holding a byte >= 0x7f used to emit raw bytes that broke the
+    # trace JSON, which dropped every later step
+    if len(trace) < 4:
+        raise SystemExit("high_bytes: trace was truncated (%d steps)" % len(trace))
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in ('\\\\u00ff', '\\\\u0080', '\\\\u00c8'):
+        if expected not in rendered:
+            raise SystemExit("high_bytes: missing escaped byte %s" % expected)
+
 if name == "coroutine":
     frame_names = []
     local_names = []
@@ -73,6 +87,8 @@ PY
 run_case native_features $'#include <array>\n#include <bit>\n#include <concepts>\n#include <numbers>\n#include <ranges>\n#include <source_location>\n#include <span>\ntemplate<std::integral T> T twice(T value) { return value + value; }\nint main() {\n  std::array<int, 3> data{1, 2, 3};\n  std::span<int> view(data);\n  auto range = std::views::iota(1, 4);\n  auto where = std::source_location::current();\n  float one = std::bit_cast<float>(0x3f800000u);\n  double pi = std::numbers::pi;\n  int answer = twice(view[1]) + *range.begin() + where.line() + int(one) + int(pi);\n  return answer;\n}'
 
 run_case iota $'#include <ranges>\nint main() {\n  auto nums = std::views::iota(2, 7);\n  auto it = nums.begin();\n  int first = *it;\n  ++it;\n  int second = *it;\n  return second;\n}'
+
+run_case high_bytes $'#include <iostream>\nint main() {\n  signed char low = -1;\n  char high = char(0x80);\n  signed char mid = -56;\n  int total = int(low) + int(mid);\n  std::cout << total << std::endl;\n  return 0;\n}'
 
 run_case jthread $'#include <stop_token>\n#include <thread>\nint main() {\n  int value = 0;\n  std::jthread worker([&](std::stop_token) { value = 42; });\n  worker.join();\n  return value;\n}'
 
