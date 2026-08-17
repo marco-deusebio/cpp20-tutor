@@ -286,13 +286,19 @@ encoded_blob = json.dumps([
     for step in trace
     for frame in (step.get("stack_to_render") or [])
 ])
-for internal in (
+# Member names are matched in their quoted JSON-key form. A bare substring
+# test is wrong here: "_M_i" also matches _M_impl, and "_M_w" also matches
+# _M_weak_count, so short names would fire on unrelated members.
+leak_names = (
     "_M_dataplus", "_M_head_impl", "_M_elems", "_M_start", "_M_finish",
-    "_M_refcount", "_M_index", "_M_engaged", "_M_payload", "__cxx11",
-    "_M_string_length", "_M_local_buf", "_Rb_tree", "_M_value",
-    # raw float bit tags must always be decoded before reaching the trace
-    "f32:", "f64:",
-):
+    "_M_refcount", "_M_index", "_M_engaged", "_M_payload",
+    "_M_string_length", "_M_local_buf", "_M_value", "_M_w", "_M_i",
+)
+# these are not member names, so they are matched as plain substrings:
+# raw float bit tags must always be decoded before reaching the trace
+leak_markers = ("__cxx11", "_Rb_tree", "f32:", "f64:")
+
+for internal in (tuple('"%s"' % n for n in leak_names) + leak_markers):
     if internal in encoded_blob:
         raise SystemExit("%s: leaked libstdc++ internal %s" % (name, internal))
 

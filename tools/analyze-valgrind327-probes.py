@@ -11,14 +11,20 @@ import re
 import sys
 from pathlib import Path
 
-# libstdc++ internals that a working summary should have hidden
-LEAK_PATTERNS = [
+# libstdc++ member names a working summary should have hidden. Matched in
+# their quoted JSON-key form: a bare substring test would make "_M_i" fire on
+# _M_impl and "_M_w" fire on _M_weak_count.
+LEAK_MEMBER_NAMES = [
     "_M_dataplus", "_M_start", "_M_finish", "_M_elems", "_M_i", "_M_value",
     "_M_ptr", "_M_refcount", "_M_u", "_M_index", "_M_first", "_M_rest",
-    "_M_head_impl", "_M_t", "__cxx11", "_Coro_", "_M_pi", "_M_engaged",
-    "_M_payload", "_M_extent", "_M_str", "_M_len", "_M_string_length",
-    "_M_local_buf", "_Rb_tree", "f32:", "f64:",
+    "_M_head_impl", "_M_t", "_M_pi", "_M_engaged", "_M_payload", "_M_extent",
+    "_M_str", "_M_len", "_M_string_length", "_M_local_buf", "_M_w",
 ]
+
+# not member names, so matched as plain substrings
+LEAK_MARKERS = ["__cxx11", "_Coro_", "_Rb_tree", "f32:", "f64:"]
+
+LEAK_PATTERNS = ['"%s"' % n for n in LEAK_MEMBER_NAMES] + LEAK_MARKERS
 
 # probes that are expected to report Valgrind errors by construction
 EXPECT_VALGRIND_ERRORS = {"uninit_reads"}

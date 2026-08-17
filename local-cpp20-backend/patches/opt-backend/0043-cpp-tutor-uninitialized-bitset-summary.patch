@@ -1,0 +1,32 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -1333,10 +1333,27 @@
+         return None
+ 
+     bit_count = get_bitset_size(type_name)
++    if bit_count is None:
++        return None
++
+     word_obj = get_direct_struct_member(obj, '_M_w')
+     words = get_bitset_words(word_obj)
+-    if bit_count is None or words is None:
+-        return None
++    if words is None:
++        # Before the first assignment Valgrind reports the storage as a
++        # sentinel rather than word values -- as a bare string for a
++        # single-word bitset, and as an array of sentinels for a multi-word
++        # one. Either way keep the source-level summary and carry the storage
++        # through as the value, rather than falling back to the raw _M_w
++        # member. Only `bits` is dropped, since there is nothing to decode.
++        if word_obj is None:
++            return None
++        return [
++            'C_STRUCT',
++            obj['addr'],
++            'std::bitset<' + str(bit_count) + '>',
++            ['size', ['C_DATA', obj['addr'], 'size_t', bit_count]],
++            ['value', encode_value(word_obj, heap)]
++        ]
+ 
+     ret = [
+         'C_STRUCT',

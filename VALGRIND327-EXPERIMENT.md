@@ -499,6 +499,12 @@ Postprocessor patches live in
   `unique_ptr` and zero-length-array bugs. The sentinel is now carried through
   into both `real` and `imag`. Found by
   `tools/probe-valgrind327-edge-cases.sh` on its first run.
+- `0043-cpp-tutor-uninitialized-bitset-summary.patch`: the same fix for
+  `std::bitset`, which exposed the raw `_M_w` member until its first
+  assignment because `get_bitset_words` could not read the sentinel string.
+  The summary now carries the sentinel through as `value` and omits `bits`.
+  This closed the uninitialized-state bug class: `std::bitset` was the last of
+  the 32 summarized types still affected.
 
 ## Porting Checklist
 
@@ -917,13 +923,22 @@ Postprocessor patches live in
      `span<int, 18446744073709551615>`. No probe rendered better on the stable
      backend. This answers whether the postprocessor summaries could be ported
      onto the 3.11 line: the tracer underneath them fails first.
-   - Known gap: summaries bail out while a value is still uninitialized and
-     expose raw members for those steps. Valgrind reports unwritten storage as
-     the sentinel string `<UNINITIALIZED>` instead of the value shape each
-     summary expects. Fixed so far for `std::complex` (`0042`); still present
-     for `std::bitset`, which renders `_M_w` until its first assignment. The
-     smoke suite's generic leak guard does not yet list `_M_w` or `_M_i`, so it
-     does not catch these. Auditing every summary against its uninitialized
-     state is the general fix.
+   - Done: the uninitialized-state bug class is closed. Every local's stack
+     slot exists from function entry, so one probe holding an instance of each
+     summarized type exposes all of them at once:
+     `tools/valgrind327-probes/uninitialized_summaries.cpp`. Of the 32
+     summarized types, only `std::bitset` still bailed and exposed `_M_w`
+     before its first assignment; `0043` carries the sentinel through as the
+     value instead. The audit now reports zero locals exposing raw members at
+     any step, not just the first.
+   - Note: the leak guards match member names in their quoted JSON-key form.
+     A plain substring test is wrong for the short names -- `_M_i` also matches
+     `_M_impl` and `_M_w` also matches `_M_weak_count` -- and a substring
+     `_M_i` entry did fire spuriously on `std::source_location`'s `_M_impl`
+     before this was corrected.
+   - Known gap: `std::source_location` has no summary patch, so it renders as
+     `source_location` with a raw `_M_impl` pointer member. This is unrelated
+     to the uninitialized-state class: it exposes the member at every step
+     because no summary exists, not because one bailed.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
    browser testing.
