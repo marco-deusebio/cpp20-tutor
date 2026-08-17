@@ -491,6 +491,14 @@ Postprocessor patches live in
   the DOM. A wide string's character buffer is never emitted as a heap block,
   so its `data` pointer could never resolve and always rendered as that marker.
   `std::map` already uses the same size-only shape.
+- `0042-cpp-tutor-uninitialized-complex-summary.patch`: keeps `std::complex`
+  summarized before it is initialized. Valgrind reports the not-yet-written
+  storage as the sentinel string `<UNINITIALIZED>` rather than a
+  `{real, imag}` pair, so the summary bailed and the raw `_M_value` member
+  reached the trace for those steps -- the same bail-out-and-leak shape as the
+  `unique_ptr` and zero-length-array bugs. The sentinel is now carried through
+  into both `real` and `imag`. Found by
+  `tools/probe-valgrind327-edge-cases.sh` on its first run.
 
 ## Porting Checklist
 
@@ -868,6 +876,10 @@ Postprocessor patches live in
      suite: the suite asserts that particular summaries are right, the sweep
      looks for traces that broke in any way. It found the high-byte, unique_ptr,
      and zero-length-array bugs.
+   - Done: on its first run from the repo the sweep found the uninitialized
+     `std::complex` leak fixed by `0042`, which the smoke suite had missed
+     because its generic guard did not list `_M_value`. `_M_value` is now in
+     that guard, so the two nets cover each other.
    - Done: post-`0017`/`0040` floating point values round-trip exactly. The
      NaN misrendering turned out to be one symptom of a wider problem: Valgrind's
      own `%f` truncates at six decimals and cannot format the extremes, so

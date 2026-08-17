@@ -289,7 +289,7 @@ encoded_blob = json.dumps([
 for internal in (
     "_M_dataplus", "_M_head_impl", "_M_elems", "_M_start", "_M_finish",
     "_M_refcount", "_M_index", "_M_engaged", "_M_payload", "__cxx11",
-    "_M_string_length", "_M_local_buf", "_Rb_tree",
+    "_M_string_length", "_M_local_buf", "_Rb_tree", "_M_value",
     # raw float bit tags must always be decoded before reaching the trace
     "f32:", "f64:",
 ):

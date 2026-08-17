@@ -1,0 +1,23 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -891,6 +891,20 @@
+ 
+     components = value.get('val')
+     if not isinstance(components, dict):
++        # Before the object is initialized Valgrind reports the whole storage
++        # as a sentinel string instead of a {real, imag} pair. Keep the
++        # source-level summary and carry the sentinel through, rather than
++        # falling back to the raw _M_value member.
++        if isinstance(components, basestring):
++            sentinel_type = get_complex_component_type(type_name,
++                                                       value.get('type'))
++            return [
++                'C_STRUCT',
++                obj['addr'],
++                get_complex_display_type(type_name),
++                ['real', ['C_DATA', obj['addr'], sentinel_type, components]],
++                ['imag', ['C_DATA', obj['addr'], sentinel_type, components]]
++            ]
+         return None
+     if 'real' not in components or 'imag' not in components:
+         return None
