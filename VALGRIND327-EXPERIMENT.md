@@ -484,6 +484,13 @@ Postprocessor patches live in
   routed through `encode_value`. JSON has no literal for the non-finite values,
   so NaN and the infinities become the readable strings `"NaN"`, `"Infinity"`,
   and `"-Infinity"`. Values that are not tagged floats pass through untouched.
+- `0041-cpp-tutor-wide-string-size-only.patch`: drops the `data` pointer from
+  the wide string summary, leaving `size`. Verified in the running visualizer:
+  `renderVarValueConnector` in `v5-unity/js/pytutor.ts` substitutes a
+  pile-of-poo emoji for any C++ pointer whose target element is missing from
+  the DOM. A wide string's character buffer is never emitted as a heap block,
+  so its `data` pointer could never resolve and always rendered as that marker.
+  `std::map` already uses the same size-only shape.
 
 ## Porting Checklist
 
@@ -831,6 +838,22 @@ Postprocessor patches live in
      `wide_strings` case.
    - Done: the `containers` smoke case also covers a zero-length array, taking
      the suite to twelve cases.
+   - Done: rendering verified in the running visualizer, not just in the trace
+     JSON. Serving `v5-unity/bottle_server.py` and stepping a program with a
+     NaN, an infinity, `1e-10`, a `std::map`, a `std::u16string`, and a
+     `std::array<int, 0>` shows `1e-10`, map `size` 1, u16string `size` 2, and
+     array `size` 0 rendering correctly. Two problems were only visible here:
+     the wide string's `data` pointer rendered as a pile-of-poo marker (fixed
+     by `0041`), and NaN/infinity render single-quoted as `'NaN'` / `'Infinity'`
+     because the frontend prints any string-valued `C_DATA` as a C-style
+     literal. Note port 5000 is commonly taken by macOS ControlCenter, and
+     `start-all.sh` would try to kill whatever holds it.
+   - Known cosmetic gap: `double` NaN and infinity display as `'NaN'` and
+     `'Infinity'`, with quotes, because JSON has no literal for them and the
+     frontend quotes string values. The value is correct and unambiguous;
+     removing the quotes means changing `v5-unity/js/pytutor.ts` and rebuilding
+     the webpack bundle, which would be this project's first fork point in the
+     vendored frontend.
    - Done: post-`0017`/`0040` floating point values round-trip exactly. The
      NaN misrendering turned out to be one symptom of a wider problem: Valgrind's
      own `%f` truncates at six decimals and cannot format the extremes, so

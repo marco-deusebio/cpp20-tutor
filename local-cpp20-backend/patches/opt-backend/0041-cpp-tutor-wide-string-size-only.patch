@@ -1,0 +1,32 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -1105,10 +1105,12 @@
+ def get_wide_string_summary(obj, heap):
+     """Summarize std::wstring / u8string / u16string / u32string.
+ 
+-    Their character buffers are deliberately left undecoded: the elements are
+-    wider than one byte, and Valgrind emits no payload for them. Rendering
+-    `data` and `size` still beats falling through to raw _M_dataplus /
+-    _M_string_length / _M_local_buf internals.
++    Only `size` is rendered. The character buffer is never emitted as a heap
++    block -- its elements are wider than one byte and Valgrind describes no
++    payload for them -- so a `data` pointer could never resolve to anything.
++    The frontend replaces such a pointer with a pile-of-poo marker (see
++    renderVarValueConnector in v5-unity/js/pytutor.ts), which is worse than
++    omitting the field. std::map takes the same size-only shape.
+     """
+     if obj.get('kind') != 'struct':
+         return None
+@@ -1123,12 +1125,6 @@
+     members = obj.get('val') or {}
+     ret = ['C_STRUCT', obj['addr'], display_type]
+ 
+-    dataplus = members.get('_M_dataplus')
+-    if dataplus and dataplus.get('kind') == 'struct':
+-        ptr = (dataplus.get('val') or {}).get('_M_p')
+-        if ptr is not None:
+-            ret.append(['data', encode_value(ptr, heap)])
+-
+     length = members.get('_M_string_length')
+     if length is not None:
+         ret.append(['size', encode_value(length, heap)])
