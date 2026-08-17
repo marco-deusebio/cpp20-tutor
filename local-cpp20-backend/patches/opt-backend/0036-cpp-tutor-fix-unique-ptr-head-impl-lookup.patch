@@ -1,0 +1,61 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -407,8 +407,44 @@
+ 
+     found.sort(key=lambda member: parse_hex_ptr(member.get('addr')) or 0)
+     return found
++
+ 
++def find_struct_member_matching(obj, member_name, predicate):
++    """Recursively find a member stored under member_name (or one of the
++    __dup suffixed spellings preserve_duplicate_json_keys produces) whose
++    value satisfies predicate.
+ 
++    libstdc++ repeats _M_head_impl once per tuple element, so an exact-match
++    lookup can return the wrong leaf; the predicate picks the intended one.
++    """
++    if not obj:
++        return None
++
++    if obj.get('kind') == 'heap_block' or obj.get('kind') == 'array':
++        for val in obj.get('val') or []:
++            found = find_struct_member_matching(val, member_name, predicate)
++            if found is not None:
++                return found
++        return None
++
++    if obj.get('kind') != 'struct':
++        return None
++
++    members = obj.get('val') or {}
++    for key in sorted(members.keys()):
++        if key == member_name or key.startswith(member_name + '__dup'):
++            member = members[key]
++            if member and predicate(member):
++                return member
++
++    for key in sorted(members.keys()):
++        found = find_struct_member_matching(members[key], member_name, predicate)
++        if found is not None:
++            return found
++
++    return None
++
++
+ def find_value_at_addr(obj, addr):
+     if not addr:
+         return None
+@@ -466,8 +502,11 @@
+     if 'unique_ptr<' not in type_name:
+         return None
+ 
+-    ptr = find_struct_member(obj, '_M_head_impl')
+-    if not ptr or ptr.get('kind') != 'pointer':
++    # a unique_ptr stores its pointer and deleter as sibling _M_head_impl
++    # members, so select the one that is actually the pointer
++    ptr = find_struct_member_matching(
++        obj, '_M_head_impl', lambda member: member.get('kind') == 'pointer')
++    if not ptr:
+         return None
+ 
+     args = top_level_template_args(type_name, 'unique_ptr') or ['element']

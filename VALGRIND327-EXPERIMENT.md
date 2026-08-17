@@ -431,6 +431,16 @@ Postprocessor patches live in
   `equal`, `equivalent`, `greater`, or `unordered`). It also adds
   `decode_trace_char_byte`, the inverse of the Valgrind-side character emitter,
   so escaped single-byte payloads can be read back as numbers.
+- `0036-cpp-tutor-fix-unique-ptr-head-impl-lookup.patch`: repairs the
+  `std::unique_ptr<T>` summary, which had silently regressed since `0011`.
+  That patch introduced `preserve_duplicate_json_keys`, renaming repeated
+  libstdc++ member names to `_M_head_impl__dup2`; because a `unique_ptr` stores
+  its pointer and its deleter as sibling `_M_head_impl` members, the summary's
+  exact-match `find_struct_member` lookup returned the deleter, failed its
+  `kind == 'pointer'` guard, and fell back to raw internals for *every*
+  `unique_ptr`, owned or null. Adds `find_struct_member_matching`, a recursive
+  `__dup`-aware finder that selects a member by predicate, and uses it to pick
+  the member that is actually the pointer.
 
 ## Porting Checklist
 
@@ -737,6 +747,12 @@ Postprocessor patches live in
      ordered locals `x,y`, and the full modern-C++ smoke suite passes all six
      cases (`native_features`, `iota`, `compare`, `high_bytes`, `jthread`,
      `coroutine`).
+   - Done: post-`0036` `std::unique_ptr` probe renders every state at source
+     level. An owned pointer shows `std::unique_ptr<int>` with
+     `pointer = 0x62CD080` and `pointee = 42`; a default-constructed one shows
+     `pointer = 0x0` with no `pointee`; after `reset()` the owned pointer drops
+     to `0x0` and its `pointee` disappears. Before the patch all three states
+     rendered as raw nested `_M_t` / `__uniq_ptr_data` / tuple internals.
    - Known limitation: `double` NaN locals still render as a large bogus
      magnitude (observed `9.223372036854776e+18`) rather than a NaN marker. The
      comparison category derived from the NaN is correct; only the NaN scalar
