@@ -42,8 +42,9 @@ This image is intentionally separate from the stable local backend. It keeps
 the current wrapper layer, points `run_cpp_backend.py` at Valgrind 3.27.1, and
 uses GCC 11.4 for native C++20 user programs. The experimental patch stack
 restores cpp-tutor trace emission, local/global values, source-level summaries
-for many standard-library types, native range iteration, C++20 threading, and
-cleaned coroutine call/return visualization. See `VALGRIND327-EXPERIMENT.md`
+for many standard-library types, three-way comparison categories, native range
+iteration, C++20 threading, and cleaned coroutine call/return visualization. See
+`VALGRIND327-EXPERIMENT.md`
 for the verified feature list, remaining representation limits, and
 patch-porting checklist.
 

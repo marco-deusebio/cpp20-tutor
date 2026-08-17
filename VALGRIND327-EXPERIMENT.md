@@ -45,7 +45,9 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::reference_wrapper<T>` summaries, `std::monostate` summaries, and
 `std::filesystem::path` summaries, `std::complex<T>` summaries,
 `std::byte` scalar values, `std::error_code` / `std::error_condition`
-summaries, `std::any` engagement summaries, plus JSON-safe stack/local
+summaries, `std::any` engagement summaries, C++20 three-way comparison
+categories (`std::strong_ordering`, `std::weak_ordering`,
+`std::partial_ordering`) rendered as named results, plus JSON-safe stack/local
 `char` traces for both control bytes and bytes at or above `0x7f`.
 Native `std::ranges::iota_view` values render with
 source-level `start` and `end` fields, and their iterators render a `current`
@@ -422,6 +424,13 @@ Postprocessor patches live in
 - `0034-cpp-tutor-thread-link-support.patch`: adds `-pthread` to user-program
   compilation so C++20 threading facilities such as `std::jthread` link and
   run inside the tracer.
+- `0035-cpp-tutor-std-comparison-category-summary.patch`: recognizes the C++20
+  three-way comparison categories `std::strong_ordering`,
+  `std::weak_ordering`, and `std::partial_ordering`, hides raw `_M_value`
+  internals, and renders a source-level `value` naming the result (`less`,
+  `equal`, `equivalent`, `greater`, or `unordered`). It also adds
+  `decode_trace_char_byte`, the inverse of the Valgrind-side character emitter,
+  so escaped single-byte payloads can be read back as numbers.
 
 ## Porting Checklist
 
@@ -716,6 +725,22 @@ Postprocessor patches live in
      `cats Hippopotamus`, and a string carrying the high bytes `0xc3 0xa9` now
      renders its heap character array as `c, a, \u00c3, \u00a9, \0` instead of
      truncating the trace.
+   - Done: post-`0035` comparison-category probe compiles/runs with 19 source
+     steps, clean postprocess stderr, parseable JSON, and Valgrind reporting
+     zero errors. `less_cmp`, `equal_cmp`, and `greater_cmp` render as
+     `std::strong_ordering` with `value` of `less`, `equal`, and `greater`;
+     `partial_cmp` and `unordered_cmp` render as `std::partial_ordering` with
+     `less` and `unordered`; `weak_equal` and `weak_greater` render as
+     `std::weak_ordering` with `equivalent` and `greater`. No raw `_M_value`
+     member remains, and `total` reaches `7`.
+   - Done: post-`0035` baseline smoke still produces a 4-step trace with
+     ordered locals `x,y`, and the full modern-C++ smoke suite passes all six
+     cases (`native_features`, `iota`, `compare`, `high_bytes`, `jthread`,
+     `coroutine`).
+   - Known limitation: `double` NaN locals still render as a large bogus
+     magnitude (observed `9.223372036854776e+18`) rather than a NaN marker. The
+     comparison category derived from the NaN is correct; only the NaN scalar
+     itself is misrendered. This predates these patches.
    - Known compiler-library boundary: GCC 11's libstdc++ does not provide
      `<format>`. Supporting that facility requires a newer user-program
      toolchain/library layer or a deliberately scoped compatibility library.

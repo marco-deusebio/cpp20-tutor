@@ -1,0 +1,101 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -831,6 +831,52 @@ def get_std_error_value_summary(obj, heap):
+         display_type,
+         ['value', encode_value(value, heap)],
+         ['category', encode_value(category, heap)]
++    ]
++
++
++# libstdc++ stores a comparison category as a single signed char holding -1
++# (less), 0 (equal/equivalent), 1 (greater), or 2 (partial_ordering's
++# unordered). Negative values arrive as escaped unsigned bytes.
++CPP_COMPARISON_CATEGORY_NAMES = {
++    'strong_ordering': {0xff: 'less', 0: 'equal', 1: 'greater'},
++    'weak_ordering': {0xff: 'less', 0: 'equivalent', 1: 'greater'},
++    'partial_ordering': {0xff: 'less', 0: 'equivalent', 1: 'greater',
++                         2: 'unordered'},
++}
++
++
++def get_std_comparison_category_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = display_cpp_type(obj.get('type') or '')
++    if type_name.startswith('std::'):
++        base_name = type_name[len('std::'):]
++    else:
++        base_name = type_name
++
++    value_names = CPP_COMPARISON_CATEGORY_NAMES.get(base_name)
++    if value_names is None:
++        return None
++
++    value = get_direct_struct_member(obj, '_M_value')
++    if value is None or value.get('kind') != 'base':
++        return None
++
++    raw_value = value.get('val')
++    byte = decode_trace_char_byte(raw_value)
++    if byte is None:
++        # keeps <UNINITIALIZED> and any unexpected payload visible
++        display_value = raw_value
++    else:
++        display_value = value_names.get(byte, byte)
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        'std::' + base_name,
++        ['value', ['C_DATA', value.get('addr', obj['addr']), 'type',
++                   display_value]]
+     ]
+ 
+ 
+@@ -1278,6 +1324,33 @@ def escape_trace_char(byte):
+     if 32 <= byte < 127:
+         return chr(byte)
+     return '\\u%04x' % byte
++
++
++# inverse of the Valgrind-side char emitter: turns one displayed char token back
++# into its raw byte value, or None when the token is not a single byte
++def decode_trace_char_byte(value):
++    if isinstance(value, (int, long)):
++        if 0 <= value <= 0xff:
++            return value
++        return None
++
++    if not isinstance(value, basestring):
++        return None
++
++    named_escapes = {'\\0': 0, '\\n': 0x0a, '\\r': 0x0d, '\\t': 0x09}
++    if value in named_escapes:
++        return named_escapes[value]
++
++    if len(value) == 6 and value.startswith('\\u'):
++        try:
++            return int(value[2:], 16)
++        except ValueError:
++            return None
++
++    if len(value) == 1:
++        return ord(value)
++
++    return None
+ 
+ 
+ def encode_inline_std_string_storage(obj, heap):
+@@ -1546,6 +1619,11 @@ def encode_value(obj, heap):
+         std_error_value_summary = get_std_error_value_summary(obj, heap)
+         if std_error_value_summary is not None:
+             return std_error_value_summary
++
++        std_comparison_category_summary = \
++            get_std_comparison_category_summary(obj, heap)
++        if std_comparison_category_summary is not None:
++            return std_comparison_category_summary
+ 
+         std_any_summary = get_std_any_summary(obj, heap)
+         if std_any_summary is not None:
