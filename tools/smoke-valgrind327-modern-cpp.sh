@@ -197,6 +197,72 @@ if name == "assoc_containers":
     if "_Rb_tree" in rendered:
         raise SystemExit("assoc_containers: raw _Rb_tree internals leaked into trace")
 
+if name == "chrono":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in (
+        "std::chrono::milliseconds",
+        "std::chrono::seconds",
+        '"count"',
+        "std::chrono::time_point<",
+        '"time_since_epoch"',
+    ):
+        if expected not in rendered:
+            raise SystemExit("chrono: missing summary token %s" % expected)
+
+if name == "bitset_atomic_byte":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in (
+        "std::bitset<8>",
+        '"bits"',
+        "std::atomic<int>",
+        "std::byte",
+    ):
+        if expected not in rendered:
+            raise SystemExit("bitset_atomic_byte: missing token %s" % expected)
+
+if name == "complex_span_tuple":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in (
+        "std::complex<double>",
+        '"real"',
+        '"imag"',
+        "std::span<int>",
+        "std::tuple<int, double>",
+    ):
+        if expected not in rendered:
+            raise SystemExit("complex_span_tuple: missing token %s" % expected)
+
+if name == "stdlib_misc":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in (
+        "std::any",
+        '"has_value"',
+        "std::filesystem::path",
+        "std::error_code",
+        "std::reference_wrapper<int>",
+    ):
+        if expected not in rendered:
+            raise SystemExit("stdlib_misc: missing token %s" % expected)
+    # an engaged std::any must report true at some point before destruction
+    if '"has_value", ["C_DATA"' in rendered and "true" not in rendered:
+        raise SystemExit("stdlib_misc: std::any never reported an engaged value")
+
 if name == "coroutine":
     frame_names = []
     local_names = []
@@ -249,6 +315,14 @@ run_case containers $'#include <array>\n#include <utility>\n#include <vector>\ni
 run_case strings $'#include <string>\n#include <string_view>\nint main() {\n  std::string small = "cats";\n  std::string large = "a string comfortably longer than the sso buffer limit";\n  std::string_view view(large);\n  std::string_view slice = view.substr(2, 6);\n  int total = int(small.size() + large.size() + slice.size());\n  return total;\n}'
 
 run_case optional_variant $'#include <optional>\n#include <variant>\nint main() {\n  std::optional<int> engaged = 5;\n  std::optional<int> empty_opt;\n  std::variant<int, double> choice = 3;\n  choice = 2.5;\n  int total = engaged.value_or(0) + empty_opt.value_or(1) + int(choice.index());\n  return total;\n}'
+
+run_case chrono $'#include <chrono>\nint main() {\n  std::chrono::milliseconds ms(250);\n  std::chrono::seconds sec(3);\n  std::chrono::steady_clock::time_point tp{};\n  long total = ms.count() + sec.count() + tp.time_since_epoch().count();\n  return int(total);\n}'
+
+run_case bitset_atomic_byte $'#include <atomic>\n#include <bitset>\n#include <cstddef>\nint main() {\n  std::bitset<8> flags(11);\n  std::atomic<int> counter(5);\n  std::byte raw{42};\n  int total = int(flags.count()) + counter.load() + int(raw);\n  return total;\n}'
+
+run_case complex_span_tuple $'#include <complex>\n#include <span>\n#include <tuple>\n#include <vector>\nint main() {\n  std::complex<double> z(1.5, -2.25);\n  std::vector<int> data{1, 2, 3};\n  std::span<int> view(data);\n  std::tuple<int, double> row{4, 5.5};\n  int total = int(z.real()) + int(view.size()) + std::get<0>(row);\n  return total;\n}'
+
+run_case stdlib_misc $'#include <any>\n#include <filesystem>\n#include <functional>\n#include <system_error>\nint main() {\n  std::any boxed = 42;\n  std::any empty_any;\n  std::filesystem::path p("/tmp/demo.txt");\n  std::error_code ec = std::make_error_code(std::errc::invalid_argument);\n  int backing = 7;\n  std::reference_wrapper<int> ref(backing);\n  int total = int(boxed.has_value()) + int(empty_any.has_value()) + ref.get();\n  return total;\n}'
 
 run_case float_values $'#include <limits>\nint main() {\n  double tiny = 1e-10;\n  double precise = 0.123456789012345;\n  double third = 1.0 / 3.0;\n  double nan_v = std::numeric_limits<double>::quiet_NaN();\n  double inf_v = std::numeric_limits<double>::infinity();\n  float single = 2.5f;\n  return int(tiny + precise + third + single);\n}'
 

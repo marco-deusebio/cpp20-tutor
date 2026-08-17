@@ -854,6 +854,12 @@ Postprocessor patches live in
      removing the quotes means changing `v5-unity/js/pytutor.ts` and rebuilding
      the webpack bundle, which would be this project's first fork point in the
      vendored frontend.
+   - Done: the smoke suite reaches seventeen cases, adding `chrono`,
+     `bitset_atomic_byte`, `complex_span_tuple`, and `stdlib_misc` so that the
+     previously untested `std::chrono`, `std::bitset`, `std::atomic`,
+     `std::byte`, `std::complex`, `std::span`, `std::tuple`, `std::any`,
+     `std::filesystem::path`, `std::error_code`, and `std::reference_wrapper`
+     summaries all have regression cover.
    - Done: post-`0017`/`0040` floating point values round-trip exactly. The
      NaN misrendering turned out to be one symptom of a wider problem: Valgrind's
      own `%f` truncates at six decimals and cannot format the extremes, so
