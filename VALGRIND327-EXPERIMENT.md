@@ -463,6 +463,11 @@ Postprocessor patches live in
   `_view` spellings), and the wide ones render `data` and `size` through a new
   `get_wide_string_summary` rather than falling through to raw internals. Only
   the `char` specialization decodes `characters`.
+- `0039-cpp-tutor-zero-length-array-summary.patch`: renders `std::array<T, 0>`
+  as an empty container with `size` 0. libstdc++ backs a zero-length array with
+  an empty `__array_traits<T, 0>::_Type` struct rather than an array, so the
+  summary's `kind == 'array'` check bailed and `_M_elems` leaked. Adds
+  `get_std_array_declared_size` to read the extent from the template argument.
 
 ## Porting Checklist
 
@@ -802,9 +807,14 @@ Postprocessor patches live in
      emits a `characters` field, so no multi-byte buffer is read one byte per
      character, and `_M_dataplus` / `_M_string_length` / `_M_local_buf` no
      longer reach the trace.
+   - Done: post-`0039` `std::array<int, 0>` renders as `std::array<int, 0>`
+     with `size` 0 and an empty `elements` array instead of leaking `_M_elems`;
+     `std::array<int, 2>` still renders its two elements unchanged.
    - Done: the smoke suite's generic leak guard also rejects
      `_M_string_length`, `_M_local_buf`, and `_Rb_tree`, and the suite gained a
      `wide_strings` case.
+   - Done: the `containers` smoke case also covers a zero-length array, taking
+     the suite to twelve cases.
    - Known limitation: `double` NaN locals still render as a large bogus
      magnitude (observed `9.223372036854776e+18`) rather than a NaN marker. The
      comparison category derived from the NaN is correct; only the NaN scalar

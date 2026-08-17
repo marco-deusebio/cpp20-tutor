@@ -111,6 +111,7 @@ if name == "containers":
     for expected in (
         "std::vector<int>",
         "std::array<int, 3>",
+        "std::array<int, 0>",
         "std::pair<int, int>",
         '"capacity"',
         '"elements"',
@@ -221,7 +222,7 @@ run_case high_bytes $'#include <iostream>\nint main() {\n  signed char low = -1;
 
 run_case smart_ptrs $'#include <memory>\nint main() {\n  std::unique_ptr<int> owned(new int(42));\n  std::unique_ptr<int> empty_owner;\n  auto shared = std::make_shared<int>(7);\n  std::weak_ptr<int> observer = shared;\n  int total = *owned + *shared + int(shared.use_count()) + int(bool(empty_owner));\n  return total;\n}'
 
-run_case containers $'#include <array>\n#include <utility>\n#include <vector>\nint main() {\n  std::vector<int> numbers{1, 2, 3};\n  std::array<int, 3> fixed{4, 5, 6};\n  std::pair<int, int> couple{7, 8};\n  numbers.push_back(9);\n  int total = numbers.back() + fixed[0] + couple.first;\n  return total;\n}'
+run_case containers $'#include <array>\n#include <utility>\n#include <vector>\nint main() {\n  std::vector<int> numbers{1, 2, 3};\n  std::array<int, 3> fixed{4, 5, 6};\n  std::array<int, 0> nothing{};\n  std::pair<int, int> couple{7, 8};\n  numbers.push_back(9);\n  int total = numbers.back() + fixed[0] + couple.first + int(nothing.size());\n  return total;\n}'
 
 run_case strings $'#include <string>\n#include <string_view>\nint main() {\n  std::string small = "cats";\n  std::string large = "a string comfortably longer than the sso buffer limit";\n  std::string_view view(large);\n  std::string_view slice = view.substr(2, 6);\n  int total = int(small.size() + large.size() + slice.size());\n  return total;\n}'
 

@@ -1,0 +1,53 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -509,6 +509,17 @@
+     return None
+ 
+ 
++def get_std_array_declared_size(type_name):
++    """Second template argument of std::array<T, N>, or None if unreadable."""
++    args = top_level_template_args(type_name or '', 'array')
++    if not args or len(args) < 2:
++        return None
++    try:
++        return int(args[1].strip())
++    except ValueError:
++        return None
++
++
+ def get_std_array_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+@@ -517,16 +528,28 @@
+     if 'array<' not in type_name:
+         return None
+ 
++    display_type = type_name
++    if not display_type.startswith('std::'):
++        display_type = 'std::' + display_type
++
+     members = obj.get('val') or {}
+     elems = members.get('_M_elems')
+     if not elems or elems.get('kind') != 'array':
++        # libstdc++ backs std::array<T, 0> with an empty
++        # __array_traits<T, 0>::_Type struct instead of an array, so there is
++        # no element storage to walk. Render the empty container rather than
++        # falling through and exposing _M_elems.
++        if get_std_array_declared_size(type_name) == 0:
++            return [
++                'C_STRUCT',
++                obj['addr'],
++                display_type,
++                ['size', ['C_DATA', obj['addr'], 'size_t', 0]],
++                ['elements', ['C_ARRAY', obj['addr']]]
++            ]
+         return None
+     encoded_elems = encode_value(elems, heap)
+ 
+-    display_type = type_name
+-    if not display_type.startswith('std::'):
+-        display_type = 'std::' + display_type
+-
+     return [
+         'C_STRUCT',
+         obj['addr'],
