@@ -1,0 +1,158 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -181,14 +181,49 @@
+     #print [(e['func_name'], e['frame_id']) for e in ret['stack_to_render']]
+ 
+     return ret
++
++
++# libstdc++ spells every string as basic_string<CharT, ...>. Matching the
++# prefix 'basic_string<char' also matches char16_t and char32_t, so the
++# character type has to be compared as a whole template argument.
++STRING_CHAR_TYPE_NAMES = {
++    'char': 'std::string',
++    'wchar_t': 'std::wstring',
++    'char8_t': 'std::u8string',
++    'char16_t': 'std::u16string',
++    'char32_t': 'std::u32string',
++}
++
++STRING_VIEW_CHAR_TYPE_NAMES = {
++    'char': 'std::string_view',
++    'wchar_t': 'std::wstring_view',
++    'char8_t': 'std::u8string_view',
++    'char16_t': 'std::u16string_view',
++    'char32_t': 'std::u32string_view',
++}
++
++
++def get_string_char_type(type_name, template_name):
++    """Character type of a basic_string/basic_string_view spelling, or None
++    when type_name is not that template."""
++    args = top_level_template_args(type_name or '', template_name)
++    if not args:
++        return None
++    return args[0].strip()
+ 
+ 
++def is_narrow_char_string(type_name, template_name):
++    """True only for the plain `char` specialization, whose buffer may safely
++    be decoded one byte per character."""
++    return get_string_char_type(type_name, template_name) == 'char'
++
++
+ def get_std_string_pointer(obj):
+     if obj.get('kind') != 'struct':
+         return None
+ 
+     type_name = obj.get('type') or ''
+-    if 'basic_string<char' not in type_name:
++    if not is_narrow_char_string(type_name, 'basic_string'):
+         return None
+ 
+     members = obj.get('val') or {}
+@@ -290,10 +325,17 @@
+ 
+ def display_cpp_type(type_name):
+     normalized = (type_name or '').strip()
+-    if (normalized.startswith('std::__cxx11::basic_string<char') or
+-            normalized.startswith('std::basic_string<char') or
+-            normalized.startswith('basic_string<char')):
+-        return 'std::string'
++    if (normalized.startswith('std::__cxx11::basic_string<') or
++            normalized.startswith('std::basic_string<') or
++            normalized.startswith('basic_string<')):
++        char_type = get_string_char_type(normalized, 'basic_string')
++        if char_type in STRING_CHAR_TYPE_NAMES:
++            return STRING_CHAR_TYPE_NAMES[char_type]
++    if (normalized.startswith('std::basic_string_view<') or
++            normalized.startswith('basic_string_view<')):
++        view_char_type = get_string_char_type(normalized, 'basic_string_view')
++        if view_char_type in STRING_VIEW_CHAR_TYPE_NAMES:
++            return STRING_VIEW_CHAR_TYPE_NAMES[view_char_type]
+     if normalized in ('monostate', 'std::monostate'):
+         return 'std::monostate'
+     return normalized
+@@ -1033,12 +1075,49 @@
+     return characters
+ 
+ 
++def get_wide_string_summary(obj, heap):
++    """Summarize std::wstring / u8string / u16string / u32string.
++
++    Their character buffers are deliberately left undecoded: the elements are
++    wider than one byte, and Valgrind emits no payload for them. Rendering
++    `data` and `size` still beats falling through to raw _M_dataplus /
++    _M_string_length / _M_local_buf internals.
++    """
++    if obj.get('kind') != 'struct':
++        return None
++
++    char_type = get_string_char_type(obj.get('type') or '', 'basic_string')
++    if char_type is None or char_type == 'char':
++        return None
++    display_type = STRING_CHAR_TYPE_NAMES.get(char_type)
++    if display_type is None:
++        return None
++
++    members = obj.get('val') or {}
++    ret = ['C_STRUCT', obj['addr'], display_type]
++
++    dataplus = members.get('_M_dataplus')
++    if dataplus and dataplus.get('kind') == 'struct':
++        ptr = (dataplus.get('val') or {}).get('_M_p')
++        if ptr is not None:
++            ret.append(['data', encode_value(ptr, heap)])
++
++    length = members.get('_M_string_length')
++    if length is not None:
++        ret.append(['size', encode_value(length, heap)])
++
++    if len(ret) == 3:
++        return None
++    return ret
++
++
+ def get_std_string_view_summary(obj, heap):
+     if obj.get('kind') != 'struct':
+         return None
+ 
+     type_name = obj.get('type') or ''
+-    if 'basic_string_view<char' not in type_name:
++    char_type = get_string_char_type(type_name, 'basic_string_view')
++    if char_type not in STRING_VIEW_CHAR_TYPE_NAMES:
+         return None
+ 
+     length = get_direct_struct_member(obj, '_M_len')
+@@ -1049,14 +1128,16 @@
+     ret = [
+         'C_STRUCT',
+         obj['addr'],
+-        'std::string_view',
++        STRING_VIEW_CHAR_TYPE_NAMES[char_type],
+         ['data', encode_value(ptr, heap)],
+         ['size', encode_value(length, heap)]
+     ]
+ 
+-    characters = get_string_view_characters(ptr, length.get('val'), heap)
+-    if characters is not None:
+-        ret.append(['characters', characters])
++    # only the narrow char buffer is safe to decode one byte per character
++    if char_type == 'char':
++        characters = get_string_view_characters(ptr, length.get('val'), heap)
++        if characters is not None:
++            ret.append(['characters', characters])
+ 
+     return ret
+ 
+@@ -1669,6 +1750,10 @@
+         if std_string_summary is not None:
+             return std_string_summary
+ 
++        wide_string_summary = get_wide_string_summary(obj, heap)
++        if wide_string_summary is not None:
++            return wide_string_summary
++
+         std_array_summary = get_std_array_summary(obj, heap)
+         if std_array_summary is not None:
+             return std_array_summary

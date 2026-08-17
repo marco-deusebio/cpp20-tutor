@@ -453,6 +453,16 @@ Postprocessor patches live in
   `_M_t` member whose type contains `_Rb_tree`, so `std::unordered_map` and
   `std::unordered_set` never match. Elements are not listed; see the porting
   checklist for why.
+- `0038-cpp-tutor-wide-char-string-types.patch`: stops treating wide character
+  strings as `std::string`. The type tests matched the prefix
+  `basic_string<char` with no closing delimiter, so `char16_t` and `char32_t`
+  matched too: `std::u16string` was labeled `std::string` and its buffer was
+  decoded one byte per character. The character type is now compared as a whole
+  template argument, each specialization gets its real name (`std::wstring`,
+  `std::u8string`, `std::u16string`, `std::u32string`, and the matching
+  `_view` spellings), and the wide ones render `data` and `size` through a new
+  `get_wide_string_summary` rather than falling through to raw internals. Only
+  the `char` specialization decodes `characters`.
 
 ## Porting Checklist
 
@@ -785,16 +795,16 @@ Postprocessor patches live in
      nothing and the trace's heap map contains no entry for them. Listing
      elements needs a Valgrind-side change to describe those node allocations,
      and then a multi-level walk rather than the current one-level dereference.
-   - Known gap: `std::u16string`, `std::u32string`, and `std::u16string_view`
-     are mislabeled as `std::string` / `std::string_view`, because the type
-     tests match the prefix `basic_string<char` without a closing delimiter and
-     so also match `char16_t` / `char32_t`. Their character buffers are never
-     emitted, so the rendered pointer targets no heap block; the frontend's
-     `isHeapRef` guard degrades this to a bare address rather than a dangling
-     arrow.
-   - Known gap: `std::array<T, 0>` leaks `_M_elems`, because libstdc++ backs a
-     zero-length array with an empty `__array_traits<T, 0>::_Type` struct
-     rather than an array, so the summary's `kind == 'array'` check bails.
+   - Done: post-`0038` wide-string probe renders `std::u16string` and
+     `std::u32string` with their real names plus `data` and `size`, and
+     `std::u16string_view` likewise, while `std::string` and `std::string_view`
+     keep their existing rendering including decoded `characters`. No wide type
+     emits a `characters` field, so no multi-byte buffer is read one byte per
+     character, and `_M_dataplus` / `_M_string_length` / `_M_local_buf` no
+     longer reach the trace.
+   - Done: the smoke suite's generic leak guard also rejects
+     `_M_string_length`, `_M_local_buf`, and `_Rb_tree`, and the suite gained a
+     `wide_strings` case.
    - Known limitation: `double` NaN locals still render as a large bogus
      magnitude (observed `9.223372036854776e+18`) rather than a NaN marker. The
      comparison category derived from the NaN is correct; only the NaN scalar

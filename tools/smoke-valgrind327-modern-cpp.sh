@@ -138,6 +138,32 @@ if name == "optional_variant":
         if expected not in rendered:
             raise SystemExit("optional_variant: missing summary token %s" % expected)
 
+if name == "wide_strings":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in (
+        "std::u16string",
+        "std::u32string",
+        "std::u16string_view",
+        "std::string_view",
+    ):
+        if expected not in rendered:
+            raise SystemExit("wide_strings: missing summary token %s" % expected)
+    # a wide buffer must never be decoded one byte per character
+    for value in encoded_values:
+        if not isinstance(value, list) or len(value) < 3:
+            continue
+        if value[2] not in ("std::u16string", "std::u32string",
+                            "std::u16string_view"):
+            continue
+        fields = [f[0] for f in value[3:] if isinstance(f, list) and f]
+        if "characters" in fields:
+            raise SystemExit(
+                "wide_strings: %s decoded characters as single bytes" % value[2])
+
 if name == "assoc_containers":
     encoded_values = []
     for step in trace:
@@ -176,6 +202,7 @@ encoded_blob = json.dumps([
 for internal in (
     "_M_dataplus", "_M_head_impl", "_M_elems", "_M_start", "_M_finish",
     "_M_refcount", "_M_index", "_M_engaged", "_M_payload", "__cxx11",
+    "_M_string_length", "_M_local_buf", "_Rb_tree",
 ):
     if internal in encoded_blob:
         raise SystemExit("%s: leaked libstdc++ internal %s" % (name, internal))
@@ -199,6 +226,8 @@ run_case containers $'#include <array>\n#include <utility>\n#include <vector>\ni
 run_case strings $'#include <string>\n#include <string_view>\nint main() {\n  std::string small = "cats";\n  std::string large = "a string comfortably longer than the sso buffer limit";\n  std::string_view view(large);\n  std::string_view slice = view.substr(2, 6);\n  int total = int(small.size() + large.size() + slice.size());\n  return total;\n}'
 
 run_case optional_variant $'#include <optional>\n#include <variant>\nint main() {\n  std::optional<int> engaged = 5;\n  std::optional<int> empty_opt;\n  std::variant<int, double> choice = 3;\n  choice = 2.5;\n  int total = engaged.value_or(0) + empty_opt.value_or(1) + int(choice.index());\n  return total;\n}'
+
+run_case wide_strings $'#include <string>\n#include <string_view>\nint main() {\n  std::u16string wide = u"ab";\n  std::u32string wider = U"cd";\n  std::string plain = "ef";\n  std::string_view plain_view(plain);\n  std::u16string_view wide_view(wide);\n  int total = int(wide.size() + wider.size() + plain.size() + wide_view.size());\n  return total;\n}'
 
 run_case assoc_containers $'#include <map>\n#include <set>\n#include <string>\nint main() {\n  std::map<std::string, int> ages;\n  ages["ada"] = 36;\n  ages["alan"] = 41;\n  std::set<int> ids;\n  ids.insert(7);\n  ids.insert(9);\n  int total = int(ages.size()) + int(ids.size());\n  return total;\n}'
 
