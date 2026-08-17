@@ -1,0 +1,74 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -1559,6 +1559,60 @@
+ 
+ 
+ # returns an encoded value in OPT format and possibly mutates the heap
++# std::map/std::set and their multi- variants are all backed by a libstdc++
++# _Rb_tree. Only the node count is recoverable today: Valgrind emits no heap
++# payload for the _Rb_tree_node allocations, so the child pointers in
++# _M_header dereference to nothing and the elements cannot be walked.
++RB_TREE_CONTAINER_ARGS = (
++    ('multimap', 2),
++    ('multiset', 1),
++    ('map', 2),
++    ('set', 1),
++)
++
++
++def get_rb_tree_display_type(type_name):
++    normalized = (type_name or '').strip()
++    if normalized.startswith('std::'):
++        normalized = normalized[len('std::'):]
++
++    for container, shown_count in RB_TREE_CONTAINER_ARGS:
++        if not normalized.startswith(container + '<'):
++            continue
++        args = top_level_template_args(normalized, container) or []
++        if len(args) < shown_count:
++            return None
++        shown = [display_cpp_type(arg) for arg in args[:shown_count]]
++        return 'std::' + container + '<' + ', '.join(shown) + '>'
++
++    return None
++
++
++def get_rb_tree_container_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    display_type = get_rb_tree_display_type(obj.get('type'))
++    if display_type is None:
++        return None
++
++    # guard on the actual tree so unordered_* and lookalikes never match
++    tree = get_direct_struct_member(obj, '_M_t')
++    if not tree or '_Rb_tree' not in (tree.get('type') or ''):
++        return None
++
++    node_count = find_struct_member(tree, '_M_node_count')
++    if node_count is None:
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['size', encode_value(node_count, heap)]
++    ]
++
++
+ def encode_value(obj, heap):
+     if obj['kind'] == 'base':
+         std_byte_summary = encode_std_byte_value(obj)
+@@ -1676,6 +1730,10 @@
+         std_vector_summary = get_std_vector_summary(obj, heap)
+         if std_vector_summary is not None:
+             return std_vector_summary
++
++        rb_tree_summary = get_rb_tree_container_summary(obj, heap)
++        if rb_tree_summary is not None:
++            return rb_tree_summary
+ 
+         ret = ['C_STRUCT', obj['addr'], obj['type']]
+ 

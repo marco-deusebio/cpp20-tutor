@@ -47,7 +47,9 @@ source-level `std::weak_ptr<T>`, `std::span<T>`, `std::string_view`, and
 `std::byte` scalar values, `std::error_code` / `std::error_condition`
 summaries, `std::any` engagement summaries, C++20 three-way comparison
 categories (`std::strong_ordering`, `std::weak_ordering`,
-`std::partial_ordering`) rendered as named results, plus JSON-safe stack/local
+`std::partial_ordering`) rendered as named results, `std::map` / `std::set` /
+`std::multimap` / `std::multiset` summaries carrying a source-level type name
+and `size` (elements are not yet listed), plus JSON-safe stack/local
 `char` traces for both control bytes and bytes at or above `0x7f`.
 Native `std::ranges::iota_view` values render with
 source-level `start` and `end` fields, and their iterators render a `current`
@@ -441,6 +443,16 @@ Postprocessor patches live in
   `unique_ptr`, owned or null. Adds `find_struct_member_matching`, a recursive
   `__dup`-aware finder that selects a member by predicate, and uses it to pick
   the member that is actually the pointer.
+- `0037-cpp-tutor-rb-tree-container-summary.patch`: summarizes the libstdc++
+  red-black-tree containers `std::map`, `std::set`, `std::multimap`, and
+  `std::multiset`, which previously fell through to the raw struct fallback and
+  exposed `_Rb_tree` / `_M_impl` / `_M_header` internals. Renders a source-level
+  type name carrying only the key/value arguments (dropping the comparator and
+  allocator) plus a `size` field read from `_M_node_count`. The container is
+  identified by an anchored prefix match and then confirmed by requiring an
+  `_M_t` member whose type contains `_Rb_tree`, so `std::unordered_map` and
+  `std::unordered_set` never match. Elements are not listed; see the porting
+  checklist for why.
 
 ## Porting Checklist
 
@@ -759,10 +771,20 @@ Postprocessor patches live in
      `_M_head_impl`, `_M_elems`, `_M_start`, `_M_finish`, `_M_refcount`,
      `_M_index`, `_M_engaged`, `_M_payload`, `__cxx11`) reaches the trace. That
      generic guard is what the `0011` regression evaded for 25 patches.
-   - Known gap: `std::map` and `std::set` have no summary patch, so they still
-     render raw red-black-tree internals (`_M_t`, `_M_i`, `__cxx11`). They are
-     deliberately absent from the smoke suite because the generic leak guard
-     would fail on them.
+   - Done: post-`0037` associative-container probe renders `std::map<int, int>`
+     and `std::set<int>` at source level with a `size` field that tracks
+     insertions (`size` reaching `2` for the map and `1` for the set), and no
+     `_Rb_tree`, `_M_impl`, or `_M_header` internals remain. A
+     `std::map<std::string, int>` renders its key type as `std::string` rather
+     than the raw `__cxx11::basic_string` spelling. The smoke suite gained an
+     `assoc_containers` case asserting both summaries and the absence of
+     `_Rb_tree`.
+   - Known gap: associative containers show `size` but not their elements.
+     Valgrind emits no heap payload for the `_Rb_tree_node` allocations, so the
+     `_M_parent` / `_M_left` / `_M_right` pointers in `_M_header` dereference to
+     nothing and the trace's heap map contains no entry for them. Listing
+     elements needs a Valgrind-side change to describe those node allocations,
+     and then a multi-level walk rather than the current one-level dereference.
    - Known gap: `std::u16string`, `std::u32string`, and `std::u16string_view`
      are mislabeled as `std::string` / `std::string_view`, because the type
      tests match the prefix `basic_string<char` without a closing delimiter and

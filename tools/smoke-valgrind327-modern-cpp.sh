@@ -138,6 +138,18 @@ if name == "optional_variant":
         if expected not in rendered:
             raise SystemExit("optional_variant: missing summary token %s" % expected)
 
+if name == "assoc_containers":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    for expected in ("std::map<std::string, int>", "std::set<int>", '"size"'):
+        if expected not in rendered:
+            raise SystemExit("assoc_containers: missing summary token %s" % expected)
+    if "_Rb_tree" in rendered:
+        raise SystemExit("assoc_containers: raw _Rb_tree internals leaked into trace")
+
 if name == "coroutine":
     frame_names = []
     local_names = []
@@ -187,6 +199,8 @@ run_case containers $'#include <array>\n#include <utility>\n#include <vector>\ni
 run_case strings $'#include <string>\n#include <string_view>\nint main() {\n  std::string small = "cats";\n  std::string large = "a string comfortably longer than the sso buffer limit";\n  std::string_view view(large);\n  std::string_view slice = view.substr(2, 6);\n  int total = int(small.size() + large.size() + slice.size());\n  return total;\n}'
 
 run_case optional_variant $'#include <optional>\n#include <variant>\nint main() {\n  std::optional<int> engaged = 5;\n  std::optional<int> empty_opt;\n  std::variant<int, double> choice = 3;\n  choice = 2.5;\n  int total = engaged.value_or(0) + empty_opt.value_or(1) + int(choice.index());\n  return total;\n}'
+
+run_case assoc_containers $'#include <map>\n#include <set>\n#include <string>\nint main() {\n  std::map<std::string, int> ages;\n  ages["ada"] = 36;\n  ages["alan"] = 41;\n  std::set<int> ids;\n  ids.insert(7);\n  ids.insert(9);\n  int total = int(ages.size()) + int(ids.size());\n  return total;\n}'
 
 run_case jthread $'#include <stop_token>\n#include <thread>\nint main() {\n  int value = 0;\n  std::jthread worker([&](std::stop_token) { value = 42; });\n  worker.join();\n  return value;\n}'
 
