@@ -753,6 +753,26 @@ Postprocessor patches live in
      `pointer = 0x0` with no `pointee`; after `reset()` the owned pointer drops
      to `0x0` and its `pointee` disappears. Before the patch all three states
      rendered as raw nested `_M_t` / `__uniq_ptr_data` / tuple internals.
+   - Done: post-`0036` smoke suite extended from six cases to ten, adding
+     `smart_ptrs`, `containers`, `strings`, and `optional_variant`, and now
+     asserts on every case that no raw libstdc++ member name (`_M_dataplus`,
+     `_M_head_impl`, `_M_elems`, `_M_start`, `_M_finish`, `_M_refcount`,
+     `_M_index`, `_M_engaged`, `_M_payload`, `__cxx11`) reaches the trace. That
+     generic guard is what the `0011` regression evaded for 25 patches.
+   - Known gap: `std::map` and `std::set` have no summary patch, so they still
+     render raw red-black-tree internals (`_M_t`, `_M_i`, `__cxx11`). They are
+     deliberately absent from the smoke suite because the generic leak guard
+     would fail on them.
+   - Known gap: `std::u16string`, `std::u32string`, and `std::u16string_view`
+     are mislabeled as `std::string` / `std::string_view`, because the type
+     tests match the prefix `basic_string<char` without a closing delimiter and
+     so also match `char16_t` / `char32_t`. Their character buffers are never
+     emitted, so the rendered pointer targets no heap block; the frontend's
+     `isHeapRef` guard degrades this to a bare address rather than a dangling
+     arrow.
+   - Known gap: `std::array<T, 0>` leaks `_M_elems`, because libstdc++ backs a
+     zero-length array with an empty `__array_traits<T, 0>::_Type` struct
+     rather than an array, so the summary's `kind == 'array'` check bails.
    - Known limitation: `double` NaN locals still render as a large bogus
      magnitude (observed `9.223372036854776e+18`) rather than a NaN marker. The
      comparison category derived from the NaN is correct; only the NaN scalar
