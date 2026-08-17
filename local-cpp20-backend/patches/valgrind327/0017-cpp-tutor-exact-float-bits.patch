@@ -1,0 +1,73 @@
+--- a/coregrind/m_debuginfo/debuginfo.c
++++ b/coregrind/m_debuginfo/debuginfo.c
+@@ -4532,6 +4532,26 @@
+    if (ent->Te.TyBase.enc != 'S' || ent->Te.TyBase.szB != sizeof(char))
+       return NULL;
+    return ent;
++}
++
++/* Valgrind's own printf has only a minimal %f: it truncates at six decimals,
++   produces nothing parseable for very large magnitudes or infinities, and
++   renders NaN as a huge integer. Emit the raw IEEE-754 bit pattern instead and
++   let the postprocessor reconstruct the exact value. */
++static void pg_emit_json_float_bits(VgFile* trace_fp, Addr data_addr,
++                                    SizeT szB)
++{
++   if (szB == sizeof(float)) {
++      UInt bits;
++      VG_(memcpy)(&bits, (void*)data_addr, sizeof(bits));
++      VG_(fprintf)(trace_fp, "\"f32:%08x\"", bits);
++   } else if (szB == sizeof(double)) {
++      ULong bits;
++      VG_(memcpy)(&bits, (void*)data_addr, sizeof(bits));
++      VG_(fprintf)(trace_fp, "\"f64:%016llx\"", bits);
++   } else {
++      VG_(fprintf)(trace_fp, "\"<UNSUPPORTED>\"");
++   }
+ }
+ 
+ static void pg_emit_json_char_value(VgFile* trace_fp, HChar ch)
+@@ -4914,19 +4934,25 @@
+    if (ent->Te.TyBase.name &&
+        VG_(strcmp)(ent->Te.TyBase.name, "complex float") == 0 &&
+        ent->Te.TyBase.szB == 2 * sizeof(float)) {
+-      float* vals = (float*)data_addr;
+-      VG_(fprintf)(trace_fp, "{\"real\":%f,\"imag\":%f}",
+-                   vals[0], vals[1]);
++      VG_(fprintf)(trace_fp, "{\"real\":");
++      pg_emit_json_float_bits(trace_fp, data_addr, sizeof(float));
++      VG_(fprintf)(trace_fp, ",\"imag\":");
++      pg_emit_json_float_bits(trace_fp, data_addr + sizeof(float),
++                              sizeof(float));
+       VG_(fprintf)(trace_fp, "}");
++      VG_(fprintf)(trace_fp, "}");
+       return;
+    }
+    if (ent->Te.TyBase.name &&
+        VG_(strcmp)(ent->Te.TyBase.name, "complex double") == 0 &&
+        ent->Te.TyBase.szB == 2 * sizeof(double)) {
+-      double* vals = (double*)data_addr;
+-      VG_(fprintf)(trace_fp, "{\"real\":%f,\"imag\":%f}",
+-                   vals[0], vals[1]);
++      VG_(fprintf)(trace_fp, "{\"real\":");
++      pg_emit_json_float_bits(trace_fp, data_addr, sizeof(double));
++      VG_(fprintf)(trace_fp, ",\"imag\":");
++      pg_emit_json_float_bits(trace_fp, data_addr + sizeof(double),
++                              sizeof(double));
+       VG_(fprintf)(trace_fp, "}");
++      VG_(fprintf)(trace_fp, "}");
+       return;
+    }
+ 
+@@ -4964,9 +4990,9 @@
+          break;
+       case 'F':
+          if (ent->Te.TyBase.szB == sizeof(float)) {
+-            VG_(fprintf)(trace_fp, "%f", *((float*)data_addr));
++            pg_emit_json_float_bits(trace_fp, data_addr, sizeof(float));
+          } else if (ent->Te.TyBase.szB == sizeof(double)) {
+-            VG_(fprintf)(trace_fp, "%f", *((double*)data_addr));
++            pg_emit_json_float_bits(trace_fp, data_addr, sizeof(double));
+          } else {
+             VG_(fprintf)(trace_fp, "\"<UNSUPPORTED>\"");
+          }

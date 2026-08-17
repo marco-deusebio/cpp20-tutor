@@ -165,6 +165,26 @@ if name == "wide_strings":
             raise SystemExit(
                 "wide_strings: %s decoded characters as single bytes" % value[2])
 
+if name == "float_values":
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    # Valgrind's own %f truncated at six decimals and mangled the extremes,
+    # so these exact spellings are the point of the bit-pattern encoding
+    for expected in (
+        "1e-10",
+        "0.123456789012345",
+        '"NaN"',
+        '"Infinity"',
+        "2.5",
+    ):
+        if expected not in rendered:
+            raise SystemExit("float_values: missing %s" % expected)
+    if "0.333333," in rendered or "0.333333]" in rendered:
+        raise SystemExit("float_values: double truncated to six decimals")
+
 if name == "assoc_containers":
     encoded_values = []
     for step in trace:
@@ -204,6 +224,8 @@ for internal in (
     "_M_dataplus", "_M_head_impl", "_M_elems", "_M_start", "_M_finish",
     "_M_refcount", "_M_index", "_M_engaged", "_M_payload", "__cxx11",
     "_M_string_length", "_M_local_buf", "_Rb_tree",
+    # raw float bit tags must always be decoded before reaching the trace
+    "f32:", "f64:",
 ):
     if internal in encoded_blob:
         raise SystemExit("%s: leaked libstdc++ internal %s" % (name, internal))
@@ -227,6 +249,8 @@ run_case containers $'#include <array>\n#include <utility>\n#include <vector>\ni
 run_case strings $'#include <string>\n#include <string_view>\nint main() {\n  std::string small = "cats";\n  std::string large = "a string comfortably longer than the sso buffer limit";\n  std::string_view view(large);\n  std::string_view slice = view.substr(2, 6);\n  int total = int(small.size() + large.size() + slice.size());\n  return total;\n}'
 
 run_case optional_variant $'#include <optional>\n#include <variant>\nint main() {\n  std::optional<int> engaged = 5;\n  std::optional<int> empty_opt;\n  std::variant<int, double> choice = 3;\n  choice = 2.5;\n  int total = engaged.value_or(0) + empty_opt.value_or(1) + int(choice.index());\n  return total;\n}'
+
+run_case float_values $'#include <limits>\nint main() {\n  double tiny = 1e-10;\n  double precise = 0.123456789012345;\n  double third = 1.0 / 3.0;\n  double nan_v = std::numeric_limits<double>::quiet_NaN();\n  double inf_v = std::numeric_limits<double>::infinity();\n  float single = 2.5f;\n  return int(tiny + precise + third + single);\n}'
 
 run_case wide_strings $'#include <string>\n#include <string_view>\nint main() {\n  std::u16string wide = u"ab";\n  std::u32string wider = U"cd";\n  std::string plain = "ef";\n  std::string_view plain_view(plain);\n  std::u16string_view wide_view(wide);\n  int total = int(wide.size() + wider.size() + plain.size() + wide_view.size());\n  return total;\n}'
 

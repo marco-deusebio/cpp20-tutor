@@ -1,0 +1,89 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -32,9 +32,11 @@
+ '''
+ 
+ 
++import binascii
+ import json
+ import os
+ import pprint
++import struct
+ import sys
+ from optparse import OptionParser
+ 
+@@ -905,8 +907,10 @@
+         'C_STRUCT',
+         obj['addr'],
+         get_complex_display_type(type_name),
+-        ['real', ['C_DATA', real_addr, component_type, components['real']]],
+-        ['imag', ['C_DATA', imag_addr, component_type, components['imag']]]
++        ['real', ['C_DATA', real_addr, component_type,
++                  decode_trace_float_value(components['real'])]],
++        ['imag', ['C_DATA', imag_addr, component_type,
++                  decode_trace_float_value(components['imag'])]]
+     ]
+ 
+ 
+@@ -1754,14 +1758,60 @@
+         display_type,
+         ['size', encode_value(node_count, heap)]
+     ]
++
++
++# Valgrind emits floats as a tagged IEEE-754 bit pattern (see the Valgrind
++# side 0017 patch) because its own %f truncates at six decimals and mangles
++# very large magnitudes, infinities, and NaN. JSON has no literal for the
++# non-finite values, so they become readable strings instead.
++NON_FINITE_TRACE_FLOATS = {
++    'nan': 'NaN',
++    'inf': 'Infinity',
++    '-inf': '-Infinity',
++}
++
++
++def decode_trace_float_value(val):
++    """Turn an 'f32:xxxxxxxx' / 'f64:xxxxxxxxxxxxxxxx' payload into a Python
++    float, or into a readable string for NaN and the infinities. Returns the
++    input unchanged when it is not a tagged float."""
++    if not isinstance(val, basestring):
++        return val
++
++    if val.startswith('f32:'):
++        fmt, width = '>f', 8
++    elif val.startswith('f64:'):
++        fmt, width = '>d', 16
++    else:
++        return val
+ 
++    digits = val[4:]
++    if len(digits) != width:
++        return val
++    try:
++        raw = binascii.unhexlify(digits)
++    except (TypeError, binascii.Error):
++        return val
+ 
++    try:
++        decoded = struct.unpack(fmt, raw)[0]
++    except struct.error:
++        return val
++
++    # repr() round-trips NaN/inf as 'nan'/'inf'/'-inf' on Python 2
++    text = repr(decoded)
++    if text in NON_FINITE_TRACE_FLOATS:
++        return NON_FINITE_TRACE_FLOATS[text]
++    return decoded
++
++
+ def encode_value(obj, heap):
+     if obj['kind'] == 'base':
+         std_byte_summary = encode_std_byte_value(obj)
+         if std_byte_summary is not None:
+             return std_byte_summary
+-        return ['C_DATA', obj['addr'], obj['type'], obj['val']]
++        return ['C_DATA', obj['addr'], obj['type'],
++                decode_trace_float_value(obj['val'])]
+ 
+     elif obj['kind'] == 'pointer':
+         if 'deref_val' in obj:

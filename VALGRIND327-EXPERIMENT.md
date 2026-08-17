@@ -299,6 +299,15 @@ Current tracked patches:
   such as `signed char low = -1` produced an empty trace. High bytes now emit
   as `\uXXXX` display tokens, matching the postprocessor's own
   `escape_trace_char` convention.
+- `0017-cpp-tutor-exact-float-bits.patch`: emits `float` and `double` values as
+  a tagged IEEE-754 bit pattern (`"f32:xxxxxxxx"` / `"f64:xxxxxxxxxxxxxxxx"`)
+  instead of formatting them with `VG_(fprintf)`'s `%f`. Valgrind's own printf
+  carries only a minimal `%f`: it truncates at six decimals, emits nothing
+  parseable for very large magnitudes or infinities, and renders NaN as a huge
+  integer. Adds `pg_emit_json_float_bits` and routes both the scalar `'F'` case
+  and the `std::complex` real/imag pair through it. This patch must ship with
+  postprocessor patch `0040`, which decodes the tags; either alone leaves float
+  values unreadable.
 
 Postprocessor patches live in
 `local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
@@ -468,6 +477,13 @@ Postprocessor patches live in
   an empty `__array_traits<T, 0>::_Type` struct rather than an array, so the
   summary's `kind == 'array'` check bailed and `_M_elems` leaked. Adds
   `get_std_array_declared_size` to read the extent from the template argument.
+- `0040-cpp-tutor-decode-exact-float-bits.patch`: decodes the tagged IEEE-754
+  payloads emitted by Valgrind patch `0017` back into exact values. Adds
+  `decode_trace_float_value`, applied both to base scalars in `encode_value`
+  and to the `std::complex` components, which are embedded directly rather than
+  routed through `encode_value`. JSON has no literal for the non-finite values,
+  so NaN and the infinities become the readable strings `"NaN"`, `"Infinity"`,
+  and `"-Infinity"`. Values that are not tagged floats pass through untouched.
 
 ## Porting Checklist
 
@@ -815,10 +831,17 @@ Postprocessor patches live in
      `wide_strings` case.
    - Done: the `containers` smoke case also covers a zero-length array, taking
      the suite to twelve cases.
-   - Known limitation: `double` NaN locals still render as a large bogus
-     magnitude (observed `9.223372036854776e+18`) rather than a NaN marker. The
-     comparison category derived from the NaN is correct; only the NaN scalar
-     itself is misrendered. This predates these patches.
+   - Done: post-`0017`/`0040` floating point values round-trip exactly. The
+     NaN misrendering turned out to be one symptom of a wider problem: Valgrind's
+     own `%f` truncates at six decimals and cannot format the extremes, so
+     `1e-10` arrived as `0.0`, `0.123456789012345` as `0.123457`, `1.0 / 3.0` as
+     `0.333333`, and both `1e300` and infinity as JSON `null`, while `-0.0` lost
+     its sign. Emitting the raw IEEE-754 bit pattern and decoding it in the
+     postprocessor now yields `1e-10`, `0.123456789012345`, `1e+300`,
+     `0.3333333333333333`, `-0.0`, `"NaN"`, and `"Infinity"` exactly.
+     `std::complex<double>` and `std::complex<float>` still render their
+     components (`1.5` / `-2.25` and `0.5` / `3.5`), and no raw `f32:` / `f64:`
+     tag reaches the trace.
    - Known compiler-library boundary: GCC 11's libstdc++ does not provide
      `<format>`. Supporting that facility requires a newer user-program
      toolchain/library layer or a deliberately scoped compatibility library.
