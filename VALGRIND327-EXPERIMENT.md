@@ -860,6 +860,14 @@ Postprocessor patches live in
      `std::byte`, `std::complex`, `std::span`, `std::tuple`, `std::any`,
      `std::filesystem::path`, `std::error_code`, and `std::reference_wrapper`
      summaries all have regression cover.
+   - Done: the edge-case probe sweep is now a repo tool rather than a scratch
+     script. `tools/probe-valgrind327-edge-cases.sh` runs every program in
+     `tools/valgrind327-probes/` through the experimental image and
+     `tools/analyze-valgrind327-probes.py` flags rejected records, empty or
+     truncated traces, and leaked libstdc++ internals. It complements the smoke
+     suite: the suite asserts that particular summaries are right, the sweep
+     looks for traces that broke in any way. It found the high-byte, unique_ptr,
+     and zero-length-array bugs.
    - Done: post-`0017`/`0040` floating point values round-trip exactly. The
      NaN misrendering turned out to be one symptom of a wider problem: Valgrind's
      own `%f` truncates at six decimals and cannot format the extremes, so
