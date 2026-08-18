@@ -875,12 +875,17 @@ Postprocessor patches live in
      because the frontend prints any string-valued `C_DATA` as a C-style
      literal. Note port 5000 is commonly taken by macOS ControlCenter, and
      `start-all.sh` would try to kill whatever holds it.
-   - Known cosmetic gap: `double` NaN and infinity display as `'NaN'` and
-     `'Infinity'`, with quotes, because JSON has no literal for them and the
-     frontend quotes string values. The value is correct and unambiguous;
-     removing the quotes means changing `v5-unity/js/pytutor.ts` and rebuilding
-     the webpack bundle, which would be this project's first fork point in the
-     vendored frontend.
+   - Done: `double` and `float` NaN and infinity now display bare as `NaN`,
+     `Infinity`, and `-Infinity`. JSON has no literal for them, so the backend
+     still sends strings; `v5-unity/js/pytutor.ts` renders those three spellings
+     without quotes when the value's type is `float`, `double`, or
+     `long double`. The type test matters: a `std::string` holding the text
+     `"NaN"` still renders quoted. Verified in the running visualizer.
+   - Note: the frontend caches `build/visualize.bundle.js` aggressively and the
+     page re-runs on a URL hash change without reloading the bundle, so a
+     rebuilt bundle can appear to have no effect. Force a real reload, and see
+     `v5-unity/add_cache_busting_query_strings.py`, which the upstream
+     production build runs for this reason.
    - Done: the smoke suite reaches seventeen cases, adding `chrono`,
      `bitset_atomic_byte`, `complex_span_tuple`, and `stdlib_misc` so that the
      previously untested `std::chrono`, `std::bitset`, `std::atomic`,

@@ -2666,6 +2666,14 @@ class DataVisualizer {
               //rep = '\uD83D\uDCA9'; // pile of poo emoji
             } else if (literalStr == '<UNALLOCATED>') {
               rep = '\uD83D\uDC80'; // skull emoji
+            } else if ((typeName === 'float' || typeName === 'double' ||
+                        typeName === 'long double') &&
+                       (literalStr === 'NaN' || literalStr === 'Infinity' ||
+                        literalStr === '-Infinity')) {
+              // JSON has no literal for the non-finite values, so the backend
+              // sends them as strings. Render them bare: a double showing
+              // 'NaN' in quotes reads as though it holds text.
+              rep = htmlspecialchars(literalStr);
             } else {
               // a regular string
               literalStr = literalStr.replace(newlineAllRegex, '\\n'); // replace ALL
