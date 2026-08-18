@@ -309,6 +309,13 @@ Current tracked patches:
   postprocessor patch `0040`, which decodes the tags; either alone leaves float
   values unreadable.
 
+- `0018-cpp-tutor-raise-tracer-step-ceiling.patch`: raises
+  `CPP_TUTOR_MAX_STEPS` from 5000 to 15000. The counter increments once per
+  instrumented step, roughly three per emitted source-line step, so 5000
+  delivered only about 1650 visible steps and the postprocessor's own 5000-step
+  cap was unreachable. Exceeding the ceiling is not a soft stop: the tracer
+  writes `MAX_STEPS_EXCEEDED` and calls `VG_(exit)`, ending the program.
+
 Postprocessor patches live in
 `local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
 `opt-cpp-backend` source after the Valgrind/runner patch layer:
@@ -527,6 +534,14 @@ Postprocessor patches live in
   Valgrind-side constant and a full recompile. Note the tracer records one step
   per source line (`ONLY_ONE_REC_PER_LINE`), so a one-line program produces very
   few steps regardless of how much work it does.
+
+- `0046-cpp-tutor-report-valgrind-step-limit.patch`: reports the tracer's own
+  step ceiling instead of discarding it. The postprocessor dropped Valgrind's
+  `MAX_STEPS_EXCEEDED` marker, so whenever the Valgrind-side cap bound first the
+  trace simply stopped -- no message, and the final step still carried an
+  ordinary event, which reads as a completed run. The marker now produces the
+  same `instruction_limit_reached` ending the postprocessor's own truncation
+  uses.
 
 ## Porting Checklist
 

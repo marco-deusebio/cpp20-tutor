@@ -1,0 +1,38 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -53,7 +53,11 @@
+ 
+ all_execution_points = []
+ 
++# set when Valgrind reports that it stopped emitting at its own step ceiling
++# (CPP_TUTOR_MAX_STEPS in memcheck/mc_translate.c)
++valgrind_step_limit_hit = False
+ 
++
+ def preserve_duplicate_json_keys(pairs):
+     ret = {}
+     seen = {}
+@@ -80,7 +84,10 @@
+         elif e.startswith('STDOUT: '):
+             stdout_lines.append(e)
+         elif e.startswith('MAX_STEPS_EXCEEDED'):
+-            pass # oof
++            # Valgrind stopped emitting here; remember it so the finished
++            # trace can say so rather than ending as though it completed
++            global valgrind_step_limit_hit
++            valgrind_step_limit_hit = True
+         else:
+             regular_lines.append(e)
+ 
+@@ -2452,6 +2459,11 @@
+         final_execution_points = final_execution_points[:MAX_STEPS]
+         final_execution_points[-1]['event'] = 'instruction_limit_reached'
+         final_execution_points[-1]['exception_msg'] = 'Stopped after running ' + str(MAX_STEPS) + ' steps. Please shorten your code,\nsince Python Tutor is not designed to handle long-running code.'
++    elif valgrind_step_limit_hit and final_execution_points:
++        # Valgrind stopped emitting before the postprocessor's own cap was
++        # reached, so the trace is short for a reason the user cannot see
++        final_execution_points[-1]['event'] = 'instruction_limit_reached'
++        final_execution_points[-1]['exception_msg'] = 'Stopped after ' + str(len(final_execution_points)) + ' steps because the tracer reached its instruction limit.\nPlease shorten your code or reduce the number of loop iterations.'
+ 
+ 
+     cod = open(fn).read()
