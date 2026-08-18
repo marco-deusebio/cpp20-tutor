@@ -1,0 +1,14 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -45,7 +45,10 @@
+ RECORD_SEP = '=== pg_trace_inst ==='
+ 
+ 
+-MAX_STEPS = 1000
++# Matches CPP_TUTOR_MAX_STEPS in memcheck/mc_translate.c, which is where
++# Valgrind stops emitting records. Raising this beyond that number has no
++# effect without also raising the Valgrind-side constant.
++MAX_STEPS = 5000
+ ONLY_ONE_REC_PER_LINE = True
+ 
+ all_execution_points = []

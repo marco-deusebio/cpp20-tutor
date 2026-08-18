@@ -519,6 +519,15 @@ Postprocessor patches live in
   anchored prefix test and then confirmed against an expected implementation
   member, so `unordered_map` cannot match inside `unordered_multimap`.
 
+- `0045-cpp-tutor-raise-max-steps.patch`: raises the postprocessor's step cap
+  from 1000 to 5000. Two caps existed: Valgrind stops emitting records at
+  `CPP_TUTOR_MAX_STEPS` (5000, in `memcheck/mc_translate.c`) while the
+  postprocessor truncated the assembled trace at 1000, so 1000 was the limit
+  users actually hit. The two now agree; raising it further also needs the
+  Valgrind-side constant and a full recompile. Note the tracer records one step
+  per source line (`ONLY_ONE_REC_PER_LINE`), so a one-line program produces very
+  few steps regardless of how much work it does.
+
 ## Porting Checklist
 
 1. Identify the cpp-tutor modifications in `valgrind-3.11.0` that add:
