@@ -1,0 +1,15 @@
+--- a/memcheck/mc_translate.c
++++ b/memcheck/mc_translate.c
+@@ -8815,7 +8815,11 @@
+ 
+ /* cpp-tutor tracing.  This is the first Valgrind 3.27.x port slice:
+    emit valid step records with line/function/stack metadata. */
+-#define CPP_TUTOR_MAX_STEPS 5000
++/* Counts instrumented steps, not source lines: roughly three of these
++   per emitted trace step. Keep this comfortably above three times
++   MAX_STEPS in vg_to_opt_trace.py, or the postprocessor's cap is
++   unreachable and traces stop early instead. */
++#define CPP_TUTOR_MAX_STEPS 15000
+ #define CPP_TUTOR_STDOUT_BUF_SIZE (10 * 1024 * 1024)
+ 
+ static Int cpp_tutor_n_steps = 0;
