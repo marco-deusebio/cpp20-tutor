@@ -159,7 +159,7 @@ needed by the local traversal patch.
 ## Local Tools
 
 - `tools/extract-valgrind327-source.sh` extracts the built 3.27.1 source tree
-  from the experimental image into `local-cpp20-backend/valgrind-3.27.1-src`.
+  from the experimental image into `local-cpp20-valgrind327-backend/valgrind-3.27.1-src`.
   That directory is generated local inspection output and is intentionally
   ignored by git.
 - `tools/valgrind327-patch-anchors.py` compares the old patched Valgrind
@@ -201,7 +201,7 @@ Useful 3.27.1 anchors found so far:
   variable traversal code was built around.
 
 Tracked Valgrind patches live in
-`local-cpp20-backend/patches/valgrind327/*.patch`. The experimental Dockerfile
+`local-cpp20-valgrind327-backend/patches/valgrind327/*.patch`. The experimental Dockerfile
 applies any patches in that directory before configuring/building Valgrind.
 
 Current tracked patches:

@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 OLD = ROOT / "v4-cokapi/backends/c_cpp/valgrind-3.11.0"
-NEW = ROOT / "local-cpp20-backend/valgrind-3.27.1-src"
+NEW = ROOT / "local-cpp20-valgrind327-backend/valgrind-3.27.1-src"
 
 
 CHECKS = {
