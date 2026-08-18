@@ -506,6 +506,19 @@ Postprocessor patches live in
   This closed the uninitialized-state bug class: `std::bitset` was the last of
   the 32 summarized types still affected.
 
+- `0044-cpp-tutor-remaining-container-summaries.patch`: summarizes the nine
+  remaining common types that still fell through to the raw struct fallback:
+  `std::source_location`, the four `std::unordered_*` containers, `std::list`,
+  `std::forward_list`, `std::deque`, the `std::stack` / `std::queue` /
+  `std::priority_queue` adapters, and `std::function`. Each renders a
+  source-level type name carrying only the leading template arguments, plus
+  whatever the trace actually holds: `size` and `bucket_count` from the
+  hashtable's `_M_element_count` / `_M_bucket_count`, `size` from
+  `std::list`'s `_M_size`, `engaged` from `std::function`'s `_M_manager`, and
+  the wrapped container for the adapters. Container names are matched with an
+  anchored prefix test and then confirmed against an expected implementation
+  member, so `unordered_map` cannot match inside `unordered_multimap`.
+
 ## Porting Checklist
 
 1. Identify the cpp-tutor modifications in `valgrind-3.11.0` that add:
@@ -936,9 +949,20 @@ Postprocessor patches live in
      `_M_impl` and `_M_w` also matches `_M_weak_count` -- and a substring
      `_M_i` entry did fire spuriously on `std::source_location`'s `_M_impl`
      before this was corrected.
-   - Known gap: `std::source_location` has no summary patch, so it renders as
-     `source_location` with a raw `_M_impl` pointer member. This is unrelated
-     to the uninitialized-state class: it exposes the member at every step
-     because no summary exists, not because one bailed.
+   - Done: post-`0044` the nine remaining unsummarized types render at source
+     level. `std::unordered_map<int, int>` shows `size` 1 and a
+     `bucket_count`, `std::list<int>` shows `size` 2,
+     `std::function<int(int)>` shows `engaged` true, `std::stack<int>` shows
+     its wrapped `std::deque<int>`, and `std::source_location`,
+     `std::deque<int>` and `std::forward_list<int>` render as names alone.
+     None of them expose `_M_impl`, `_Hash_node_base`, `_M_bucket_count`,
+     `_M_cur`, `_M_head` or the other raw members they used to.
+   - Known gap: `std::source_location` reports only its type. It holds one
+     opaque pointer to an implementation record the trace does not describe,
+     so the file, line, and function it exists to carry are unreachable.
+   - Known gap: `std::deque`, `std::forward_list`, and the container adapters
+     report no size. libstdc++ derives a deque's length from its iterators and
+     stores none at all for a forward_list, so unlike `std::list` there is no
+     count to read.
 6. Only after those pass, use `start-all-valgrind327-experimental.sh` for
    browser testing.

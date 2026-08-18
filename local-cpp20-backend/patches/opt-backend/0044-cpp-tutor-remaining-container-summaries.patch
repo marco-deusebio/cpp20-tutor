@@ -1,0 +1,238 @@
+--- a/vg_to_opt_trace.py
++++ b/vg_to_opt_trace.py
+@@ -1830,8 +1830,203 @@
+     if text in NON_FINITE_TRACE_FLOATS:
+         return NON_FINITE_TRACE_FLOATS[text]
+     return decoded
++
++
++# Containers whose source-level spelling keeps only the leading template
++# arguments; the rest are comparators, hashers, and allocators. Every entry is
++# matched with an anchored startswith, so no name can match inside another
++# (unordered_map never matches inside unordered_multimap).
++SIMPLE_CONTAINER_ARGS = (
++    ('unordered_multimap', 2),
++    ('unordered_multiset', 1),
++    ('unordered_map', 2),
++    ('unordered_set', 1),
++    ('forward_list', 1),
++    ('priority_queue', 1),
++    ('list', 1),
++    ('deque', 1),
++    ('stack', 1),
++    ('queue', 1),
++)
++
++
++def get_simple_container_display_type(type_name, allowed=None):
++    normalized = (type_name or '').strip()
++    if normalized.startswith('std::'):
++        normalized = normalized[len('std::'):]
++
++    for container, shown_count in SIMPLE_CONTAINER_ARGS:
++        if allowed is not None and container not in allowed:
++            continue
++        if not normalized.startswith(container + '<'):
++            continue
++        args = top_level_template_args(normalized, container) or []
++        if len(args) < shown_count:
++            return None
++        shown = [display_cpp_type(arg) for arg in args[:shown_count]]
++        return 'std::' + container + '<' + ', '.join(shown) + '>'
+ 
++    return None
+ 
++
++UNORDERED_CONTAINERS = ('unordered_map', 'unordered_set',
++                        'unordered_multimap', 'unordered_multiset')
++
++
++def get_unordered_container_summary(obj, heap):
++    """std::unordered_* keep a live element count and bucket count, so both are
++    reported. Elements are not listed: like the red-black tree containers, the
++    nodes are not described in the trace."""
++    if obj.get('kind') != 'struct':
++        return None
++
++    display_type = get_simple_container_display_type(obj.get('type'),
++                                                     UNORDERED_CONTAINERS)
++    if display_type is None:
++        return None
++
++    table = get_direct_struct_member(obj, '_M_h')
++    if not table or '_Hashtable' not in (table.get('type') or ''):
++        return None
++
++    ret = ['C_STRUCT', obj['addr'], display_type]
++    element_count = find_struct_member(table, '_M_element_count')
++    if element_count is not None:
++        ret.append(['size', encode_value(element_count, heap)])
++    bucket_count = find_struct_member(table, '_M_bucket_count')
++    if bucket_count is not None:
++        ret.append(['bucket_count', encode_value(bucket_count, heap)])
++
++    if len(ret) == 3:
++        return None
++    return ret
++
++
++def get_std_list_summary(obj, heap):
++    """std::list stores its length, so it renders a real size."""
++    if obj.get('kind') != 'struct':
++        return None
++
++    display_type = get_simple_container_display_type(obj.get('type'), ('list',))
++    if display_type is None:
++        return None
++
++    impl = get_direct_struct_member(obj, '_M_impl')
++    if not impl or '_List_impl' not in (impl.get('type') or ''):
++        return None
++
++    size = find_struct_member(impl, '_M_size')
++    if size is None:
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['size', encode_value(size, heap)]
++    ]
++
++
++# libstdc++ keeps no length for these: a deque derives it from its iterators
++# and a forward_list stores none at all. They render as a source-level name so
++# the raw node and map internals stay hidden.
++NAME_ONLY_SEQUENCES = (
++    ('deque', '_Deque_impl'),
++    ('forward_list', '_Fwd_list_impl'),
++)
++
++
++def get_name_only_sequence_summary(obj, heap):
++    if obj.get('kind') != 'struct':
++        return None
++
++    impl = get_direct_struct_member(obj, '_M_impl')
++    if not impl:
++        return None
++    impl_type = impl.get('type') or ''
++
++    for container, impl_marker in NAME_ONLY_SEQUENCES:
++        if impl_marker not in impl_type:
++            continue
++        display_type = get_simple_container_display_type(obj.get('type'),
++                                                         (container,))
++        if display_type is None:
++            return None
++        return ['C_STRUCT', obj['addr'], display_type]
++
++    return None
++
++
++CONTAINER_ADAPTERS = ('stack', 'queue', 'priority_queue')
++
++
++def get_container_adapter_summary(obj, heap):
++    """std::stack / queue / priority_queue wrap another container in a member
++    named `c`; render the adapter name and delegate the wrapped container."""
++    if obj.get('kind') != 'struct':
++        return None
++
++    display_type = get_simple_container_display_type(obj.get('type'),
++                                                     CONTAINER_ADAPTERS)
++    if display_type is None:
++        return None
++
++    wrapped = get_direct_struct_member(obj, 'c')
++    if wrapped is None:
++        return None
++
++    return [
++        'C_STRUCT',
++        obj['addr'],
++        display_type,
++        ['container', encode_value(wrapped, heap)]
++    ]
++
++
++def get_std_function_summary(obj, heap):
++    """std::function is empty exactly when its manager pointer is null."""
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = (obj.get('type') or '').strip()
++    normalized = type_name[len('std::'):] if type_name.startswith('std::') else type_name
++    if not normalized.startswith('function<'):
++        return None
++
++    manager = get_direct_struct_member(obj, '_M_manager')
++    if not manager or manager.get('kind') != 'pointer':
++        return None
++
++    display_type = normalized if normalized.startswith('std::') else 'std::' + normalized
++    ret = ['C_STRUCT', obj['addr'], display_type]
++
++    manager_val = manager.get('val')
++    if isinstance(manager_val, basestring) and manager_val.startswith('0x'):
++        ret.append(['engaged', ['C_DATA', obj['addr'], 'bool',
++                                manager_val != '0x0']])
++    else:
++        ret.append(['engaged', ['C_DATA', obj['addr'], 'bool', manager_val]])
++    return ret
++
++
++def get_std_source_location_summary(obj, heap):
++    """std::source_location holds one opaque pointer to an implementation
++    record that the trace does not describe, so the file, line, and function
++    are unreachable. Render the source-level name rather than that pointer."""
++    if obj.get('kind') != 'struct':
++        return None
++
++    type_name = (obj.get('type') or '').strip()
++    normalized = type_name[len('std::'):] if type_name.startswith('std::') else type_name
++    if normalized != 'source_location':
++        return None
++
++    if get_direct_struct_member(obj, '_M_impl') is None:
++        return None
++
++    return ['C_STRUCT', obj['addr'], 'std::source_location']
++
++
+ def encode_value(obj, heap):
+     if obj['kind'] == 'base':
+         std_byte_summary = encode_std_byte_value(obj)
+@@ -1958,7 +2153,31 @@
+         rb_tree_summary = get_rb_tree_container_summary(obj, heap)
+         if rb_tree_summary is not None:
+             return rb_tree_summary
++
++        unordered_summary = get_unordered_container_summary(obj, heap)
++        if unordered_summary is not None:
++            return unordered_summary
++
++        list_summary = get_std_list_summary(obj, heap)
++        if list_summary is not None:
++            return list_summary
++
++        sequence_summary = get_name_only_sequence_summary(obj, heap)
++        if sequence_summary is not None:
++            return sequence_summary
++
++        adapter_summary = get_container_adapter_summary(obj, heap)
++        if adapter_summary is not None:
++            return adapter_summary
++
++        function_summary = get_std_function_summary(obj, heap)
++        if function_summary is not None:
++            return function_summary
+ 
++        source_location_summary = get_std_source_location_summary(obj, heap)
++        if source_location_summary is not None:
++            return source_location_summary
++
+         ret = ['C_STRUCT', obj['addr'], obj['type']]
+ 
+         # sort struct members by address so that they look ORDERED

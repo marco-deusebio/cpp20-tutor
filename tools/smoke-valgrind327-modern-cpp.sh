@@ -263,6 +263,34 @@ if name == "stdlib_misc":
     if '"has_value", ["C_DATA"' in rendered and "true" not in rendered:
         raise SystemExit("stdlib_misc: std::any never reported an engaged value")
 
+if name in ("unordered_and_function", "sequence_containers"):
+    encoded_values = []
+    for step in trace:
+        for frame in step.get("stack_to_render") or []:
+            encoded_values.extend((frame.get("encoded_locals") or {}).values())
+    rendered = json.dumps(encoded_values)
+    expected_tokens = {
+        "unordered_and_function": (
+            "std::source_location",
+            "std::unordered_map<int, int>",
+            "std::unordered_set<int>",
+            "std::function<int(int)>",
+            '"bucket_count"',
+            '"engaged"',
+        ),
+        "sequence_containers": (
+            "std::deque<int>",
+            "std::list<int>",
+            "std::forward_list<int>",
+            "std::stack<int>",
+            "std::queue<int>",
+            '"container"',
+        ),
+    }[name]
+    for expected in expected_tokens:
+        if expected not in rendered:
+            raise SystemExit("%s: missing summary token %s" % (name, expected))
+
 if name == "coroutine":
     frame_names = []
     local_names = []
@@ -335,6 +363,10 @@ run_case float_values $'#include <limits>\nint main() {\n  double tiny = 1e-10;\
 run_case wide_strings $'#include <string>\n#include <string_view>\nint main() {\n  std::u16string wide = u"ab";\n  std::u32string wider = U"cd";\n  std::string plain = "ef";\n  std::string_view plain_view(plain);\n  std::u16string_view wide_view(wide);\n  int total = int(wide.size() + wider.size() + plain.size() + wide_view.size());\n  return total;\n}'
 
 run_case assoc_containers $'#include <map>\n#include <set>\n#include <string>\nint main() {\n  std::map<std::string, int> ages;\n  ages["ada"] = 36;\n  ages["alan"] = 41;\n  std::set<int> ids;\n  ids.insert(7);\n  ids.insert(9);\n  int total = int(ages.size()) + int(ids.size());\n  return total;\n}'
+
+run_case unordered_and_function $'#include <functional>\n#include <source_location>\n#include <unordered_map>\n#include <unordered_set>\nint main() {\n  std::source_location where = std::source_location::current();\n  std::unordered_map<int, int> umap;\n  umap[1] = 10;\n  std::unordered_set<int> uset;\n  uset.insert(7);\n  std::function<int(int)> fn = [](int v) { return v + 1; };\n  int total = int(umap.size()) + int(uset.size()) + fn(1) + int(where.line());\n  return total & 1;\n}'
+
+run_case sequence_containers $'#include <deque>\n#include <forward_list>\n#include <list>\n#include <queue>\n#include <stack>\nint main() {\n  std::deque<int> dq{1, 2};\n  std::list<int> lst{3, 4};\n  std::forward_list<int> flist{5};\n  std::stack<int> stk;\n  stk.push(6);\n  std::queue<int> q;\n  q.push(7);\n  int total = int(dq.size() + lst.size() + stk.size() + q.size());\n  return total & 1;\n}'
 
 run_case jthread $'#include <stop_token>\n#include <thread>\nint main() {\n  int value = 0;\n  std::jthread worker([&](std::stop_token) { value = 42; });\n  worker.join();\n  return value;\n}'
 
