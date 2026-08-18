@@ -48,5 +48,19 @@ iteration, C++20 threading, and cleaned coroutine call/return visualization. See
 for the verified feature list, remaining representation limits, and
 patch-porting checklist.
 
+## Rebuilding the frontend
+
+The visualizer bundles in `v5-unity/build/` are generated from
+`v5-unity/js/*.ts` by webpack:
+
+    cd v5-unity && node_modules/.bin/webpack
+
+Do not hand-edit a bundle. The C++ language label was previously changed
+directly in `visualize.bundle.js` without the matching change in
+`pytutor.ts`, so any rebuild silently reverted it to `C++ (gcc 4.8, C++11)`
+and the other eight bundles still carried the stale label. The label now
+lives in `pytutor.ts` and two consecutive builds produce byte-identical
+bundles, so a rebuild is safe.
+
 ## Stop
 Press Ctrl+C in the terminal running ./start-all.sh
