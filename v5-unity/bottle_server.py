@@ -53,7 +53,7 @@ def proxy_to_local_cokapi(endpoint):
                 'Accept': 'application/json,text/plain,*/*'
             }
         )
-        with urllib.request.urlopen(req, timeout=45) as remote:
+        with urllib.request.urlopen(req, timeout=600) as remote:
             response.status = remote.status
             response.content_type = remote.headers.get('Content-Type', 'application/json')
             return remote.read()

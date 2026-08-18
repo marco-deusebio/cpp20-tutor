@@ -74,7 +74,7 @@ if (args.length > 0) {
 // spawn a shell
 // http://nodejs.org/api/child_process.html#child_process_child_process_execfile_file_args_options_callback
 
-var TIMEOUT_SECS = 120;
+var TIMEOUT_SECS = 600;
 
 var MAX_BUFFER_SIZE = 10 * 1024 * 1024;
 
