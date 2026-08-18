@@ -17,7 +17,7 @@ Build with:
 The `-sb` image reuses the current local preserve-display wrapper from
 `cpp-tutor/opt-cpp-backend-cpp20-sb:local`.
 The experimental Dockerfile also applies postprocessor patches from
-`local-cpp20-backend/patches/opt-backend/*.patch` after cloning
+`local-cpp-and-cpp20-backend/patches/opt-backend/*.patch` after cloning
 `opt-cpp-backend` and after the Valgrind build layer, so postprocessor-only
 changes can usually rebuild without recompiling Valgrind.
 
@@ -317,7 +317,7 @@ Current tracked patches:
   writes `MAX_STEPS_EXCEEDED` and calls `VG_(exit)`, ending the program.
 
 Postprocessor patches live in
-`local-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
+`local-cpp-and-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
 `opt-cpp-backend` source after the Valgrind/runner patch layer:
 
 - `0001-cpp-tutor-std-string-postprocess.patch`: collapses libstdc++

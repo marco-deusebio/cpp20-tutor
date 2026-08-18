@@ -104,7 +104,7 @@ RUN apt-get update \
 
 ENV CPP_TUTOR_NATIVE_CPP20=1
 
-COPY patches/opt-backend /tmp/opt-backend-patches
+COPY --from=optbackendpatches . /tmp/opt-backend-patches
 
 RUN cd /tmp/opt-cpp-backend \
     && if ls /tmp/opt-backend-patches/*.patch >/dev/null 2>&1; then \
