@@ -76,7 +76,11 @@ if (args.length > 0) {
 
 var TIMEOUT_SECS = 600;
 
-var MAX_BUFFER_SIZE = 10 * 1024 * 1024;
+// Raised alongside the 5x trace step cap. A trace at the emitter's ceiling
+// measured 2.53 MB with a handful of locals in scope, and per-step size
+// scales with how many locals a program keeps live, so the ceiling for a
+// local-heavy program is well above that.
+var MAX_BUFFER_SIZE = 50 * 1024 * 1024;
 
 var MEM_LIMIT = "1024m"; var DOCKER_BIN = process.env.DOCKER_BIN || "docker"; // raise it from 512MB to 1024MB and measure what happens
 
