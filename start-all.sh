@@ -2,7 +2,7 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
-URL="http://localhost:5000/visualize.html"
+URL="http://localhost:5050/visualize.html"
 CPP_IMAGE="${CPP_TUTOR_CPP_IMAGE:-cpp-tutor/opt-cpp-backend-cpp20-sb:local}"
 
 stop_server_on_port() {
@@ -24,7 +24,7 @@ stop_server_on_port() {
   fi
 }
 
-stop_server_on_port 5000
+stop_server_on_port 5050
 stop_server_on_port 3000
 
 if ! docker info >/dev/null 2>&1; then

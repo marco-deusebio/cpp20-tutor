@@ -82,4 +82,4 @@ def server_static(filepath):
     return static_file(filepath, root='.')
 
 if __name__ == "__main__":
-    run(host='localhost', port=5000, reloader=False)
+    run(host='localhost', port=5050, reloader=False)

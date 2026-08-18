@@ -10,7 +10,7 @@ Run:
 ./start-all.sh
 
 Then open:
-http://localhost:5000/visualize.html
+http://localhost:5050/visualize.html
 
 The local C++ backend compiles with GNU++20 and includes compatibility rewrites
 for common modern features such as structured bindings, `std::numbers`,

@@ -25,7 +25,7 @@ cd "$V5_DIR"
 
 echo "Starting cpp-tutor frontend..."
 echo "Open this in your browser:"
-echo "http://localhost:5000/visualize.html"
+echo "http://localhost:5050/visualize.html"
 echo
 
 "$VENV_PY" bottle_server.py
