@@ -17,7 +17,7 @@ Build with:
 The `-sb` image reuses the current local preserve-display wrapper from
 `cpp-tutor/opt-cpp-backend-cpp20-sb:local`.
 The experimental Dockerfile also applies postprocessor patches from
-`local-cpp-and-cpp20-backend/patches/opt-backend/*.patch` after cloning
+`local-cpp-backend/patches/opt-backend/*.patch` after cloning
 `opt-cpp-backend` and after the Valgrind build layer, so postprocessor-only
 changes can usually rebuild without recompiling Valgrind.
 
@@ -159,7 +159,7 @@ needed by the local traversal patch.
 ## Local Tools
 
 - `tools/extract-valgrind327-source.sh` extracts the built 3.27.1 source tree
-  from the experimental image into `local-cpp20-valgrind327-backend/valgrind-3.27.1-src`.
+  from the experimental image into `local-valgrind327-backend/valgrind-3.27.1-src`.
   That directory is generated local inspection output and is intentionally
   ignored by git.
 - `tools/valgrind327-patch-anchors.py` compares the old patched Valgrind
@@ -201,7 +201,7 @@ Useful 3.27.1 anchors found so far:
   variable traversal code was built around.
 
 Tracked Valgrind patches live in
-`local-cpp20-valgrind327-backend/patches/valgrind327/*.patch`. The experimental Dockerfile
+`local-valgrind327-backend/patches/valgrind327/*.patch`. The experimental Dockerfile
 applies any patches in that directory before configuring/building Valgrind.
 
 Current tracked patches:
@@ -317,7 +317,7 @@ Current tracked patches:
   writes `MAX_STEPS_EXCEEDED` and calls `VG_(exit)`, ending the program.
 
 Postprocessor patches live in
-`local-cpp-and-cpp20-backend/patches/opt-backend/*.patch` and are applied to the cloned
+`local-cpp-backend/patches/opt-backend/*.patch` and are applied to the cloned
 `opt-cpp-backend` source after the Valgrind/runner patch layer:
 
 - `0001-cpp-tutor-std-string-postprocess.patch`: collapses libstdc++

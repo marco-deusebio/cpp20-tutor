@@ -12,12 +12,12 @@ fi
 docker build \
   --platform linux/amd64 \
   -t cpp-tutor/opt-cpp-backend-valgrind327:experimental \
-  -f "$PROJECT_DIR/local-cpp20-valgrind327-backend/Dockerfile.valgrind327" \
-  --build-context optbackendpatches="$PROJECT_DIR/local-cpp-and-cpp20-backend/patches/opt-backend" \
-  "$PROJECT_DIR/local-cpp20-valgrind327-backend"
+  -f "$PROJECT_DIR/local-valgrind327-backend/Dockerfile.valgrind327" \
+  --build-context optbackendpatches="$PROJECT_DIR/local-cpp-backend/patches/opt-backend" \
+  "$PROJECT_DIR/local-valgrind327-backend"
 
 docker build \
   --platform linux/amd64 \
   -t cpp-tutor/opt-cpp-backend-valgrind327-sb:experimental \
-  -f "$PROJECT_DIR/local-cpp20-valgrind327-backend/Dockerfile.valgrind327.preserve-display" \
-  "$PROJECT_DIR/local-cpp20-valgrind327-backend"
+  -f "$PROJECT_DIR/local-valgrind327-backend/Dockerfile.valgrind327.preserve-display" \
+  "$PROJECT_DIR/local-valgrind327-backend"

@@ -2,7 +2,7 @@
 set -e
 
 PROJECT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-OUT_DIR="${1:-$PROJECT_DIR/local-cpp20-valgrind327-backend/valgrind-3.27.1-src}"
+OUT_DIR="${1:-$PROJECT_DIR/local-valgrind327-backend/valgrind-3.27.1-src}"
 IMAGE="${CPP_TUTOR_VALGRIND327_IMAGE:-cpp-tutor/opt-cpp-backend-valgrind327:experimental}"
 CID=""
 
