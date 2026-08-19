@@ -12,5 +12,5 @@ docker build \
 docker build \
   --platform linux/amd64 \
   -t cpp-tutor/opt-cpp-backend-cpp20-sb:local \
-  -f "$PROJECT_DIR/local-valgrind327-backend/Dockerfile.cpp20-compat-wrapper" \
-  "$PROJECT_DIR/local-valgrind327-backend"
+  -f "$PROJECT_DIR/local-cpp-backend/Dockerfile.cpp20-compat-wrapper" \
+  "$PROJECT_DIR/local-cpp-backend"
