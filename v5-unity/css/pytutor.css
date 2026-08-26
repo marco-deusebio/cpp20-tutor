@@ -590,10 +590,6 @@ div.ExecutionVisualizer .stackFrameVarTable {
   text-align: right;
   padding-top: 3px;
 
-  /* right-align the table */
-  margin-left: auto;
-  margin-right: 0px;
-
   /* hack to counteract possible nasty CSS reset styles from parent divs */
   border-collapse: separate;
   border-spacing: 2px;
